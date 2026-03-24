@@ -90,11 +90,22 @@ fn single_compile(input: &str, output: &str, grammar: Option<&printing_press::in
 fn batch_compile(sources_dir: &str, out_dir: &str, grammar: Option<&printing_press::inklang::grammar::MergedGrammar>, debug: bool) {
     let src_path = std::path::Path::new(sources_dir);
     let out_path = std::path::Path::new(out_dir);
-    std::fs::create_dir_all(out_path).unwrap();
 
-    let entries: Vec<_> = std::fs::read_dir(src_path)
-        .unwrap()
-        .filter_map(|e| e.ok())
+    if let Err(e) = std::fs::create_dir_all(out_path) {
+        eprintln!("error: could not create output directory '{}': {}", out_dir, e);
+        std::process::exit(1);
+    }
+
+    let entries: Vec<_> = match std::fs::read_dir(src_path) {
+        Ok(entries) => entries.filter_map(|e| e.ok()).collect(),
+        Err(e) => {
+            eprintln!("error: could not read directory '{}': {}", sources_dir, e);
+            std::process::exit(1);
+        }
+    };
+
+    let entries: Vec<_> = entries
+        .into_iter()
         .filter(|e| e.path().extension().map_or(false, |ext| ext == "ink"))
         .collect();
 
@@ -106,7 +117,9 @@ fn batch_compile(sources_dir: &str, out_dir: &str, grammar: Option<&printing_pre
     let mut errors = 0;
     for entry in entries {
         let input_path = entry.path();
-        let file_name = input_path.file_stem().unwrap().to_str().unwrap();
+        let file_name = input_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
         let output_path = out_path.join(format!("{}.inkc", file_name));
 
         let source = match std::fs::read_to_string(&input_path) {
