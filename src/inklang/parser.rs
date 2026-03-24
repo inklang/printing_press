@@ -31,9 +31,9 @@ enum Precedence {
     /// Type check: is
     Is = 35,
     /// Comparison: ==, !=, <, >, <=, >=
-    Comparison = 40,
+    Comparison = 45,
     /// Field existence: has
-    Has = 45,
+    Has = 40,
     /// Range: ..
     Range = 55,
     /// Term: +, -
@@ -96,12 +96,22 @@ impl Parser {
             TokenType::KwIf => self.parse_if(),
             TokenType::KwClass => self.parse_class(annotations),
             TokenType::KwAsync => {
-                self.advance();
+                // Check if this is async fn or async lambda
                 if self.check(&TokenType::KwFn) {
+                    self.advance(); // consume async
                     self.parse_func(annotations, false)
+                } else if self.check_ahead(1, &TokenType::LParen) {
+                    // async lambda expression at statement level: async (x) -> { x }
+                    // Don't consume async here - parse_prefix will see it and set is_async
+                    let expr = self.parse_prefix()?;
+                    // Consume any trailing semicolon
+                    if self.check(&TokenType::Semicolon) {
+                        self.advance();
+                    }
+                    Ok(Stmt::Expr(expr))
                 } else {
                     Err(Error::Parse(format!(
-                        "Expected 'fn' after 'async', found {:?}",
+                        "Expected 'fn' or '(' after 'async', found {:?}",
                         self.peek().typ
                     )))
                 }
@@ -126,7 +136,33 @@ impl Parser {
             TokenType::KwOn => self.parse_on_handler(),
             TokenType::KwEnable => self.parse_enable(),
             TokenType::KwDisable => self.parse_disable(),
-            TokenType::LBrace => self.parse_block(),
+            TokenType::LBrace => {
+                // Could be block or map/set literal
+                // Use lookahead to distinguish:
+                // - If next token is a statement keyword (let, const, if, etc.), it's a block
+                // - If next token is `}` (empty block), it's a block
+                // - If next token is an expression (Int, String, etc.) followed by semicolon, it's a block (statements)
+                // - If next token is String/Identifier followed by ':', it's a map (expression parsing handles)
+                // - Otherwise, try expression parsing first (could be set literal)
+                let is_block = self.check_ahead(1, &TokenType::KwLet)
+                    || self.check_ahead(1, &TokenType::KwConst)
+                    || self.check_ahead(1, &TokenType::KwIf)
+                    || self.check_ahead(1, &TokenType::KwWhile)
+                    || self.check_ahead(1, &TokenType::KwFor)
+                    || self.check_ahead(1, &TokenType::KwReturn)
+                    || self.check_ahead(1, &TokenType::RBrace) // empty block
+                    || (self.is_expression_starter(self.tokens[self.current + 1].typ)
+                        && self.check_ahead(2, &TokenType::Semicolon)); // expr; indicates block with statements
+                if is_block {
+                    Ok(self.parse_block()?)
+                } else {
+                    let expr = self.parse_expression(Precedence::None)?;
+                    if self.check(&TokenType::Semicolon) {
+                        self.advance();
+                    }
+                    Ok(Stmt::Expr(expr))
+                }
+            }
             _ => {
                 let expr = self.parse_expression(Precedence::None)?;
                 if self.check(&TokenType::Assign) || self.check(&TokenType::AddEquals)
@@ -229,7 +265,7 @@ impl Parser {
                 let param_annotations = self.parse_annotations()?;
                 let param_name = self.consume(&TokenType::Identifier, "Expected parameter name")?;
                 let param_type = if self.match_token(&[TokenType::Colon]) {
-                    Some(self.consume(&TokenType::Identifier, "Expected type")?)
+                    Some(self.parse_type()?)
                 } else {
                     None
                 };
@@ -349,8 +385,7 @@ impl Parser {
                             let param_name =
                                 self.consume(&TokenType::Identifier, "Expected parameter name")?;
                             self.consume(&TokenType::Colon, "Expected ':' after parameter name")?;
-                            let param_type =
-                                self.consume(&TokenType::Identifier, "Expected type")?;
+                            let param_type = self.parse_type()?;
                             params.push(Param {
                                 annotations: vec![],
                                 name: param_name,
@@ -392,7 +427,7 @@ impl Parser {
             let is_key = self.match_token(&[TokenType::KwKey]);
             let field_name = self.consume(&TokenType::Identifier, "Expected field name")?;
             let field_type = if self.match_token(&[TokenType::Colon]) {
-                Some(self.consume(&TokenType::Identifier, "Expected type")?.lexeme)
+                Some(self.parse_type()?.lexeme)
             } else {
                 None
             };
@@ -494,7 +529,7 @@ impl Parser {
             loop {
                 let param_name = self.consume(&TokenType::Identifier, "Expected parameter name")?;
                 self.consume(&TokenType::Colon, "Expected ':' after parameter name")?;
-                let param_type = self.consume(&TokenType::Identifier, "Expected type")?;
+                let param_type = self.parse_type()?;
                 params.push(EventParam {
                     name: param_name,
                     type_: param_type,
@@ -524,7 +559,7 @@ impl Parser {
             while !self.check(&TokenType::RParen) && !self.is_at_end() {
                 self.consume(&TokenType::Identifier, "Expected parameter name")?;
                 self.consume(&TokenType::Colon, "Expected ':' after parameter name")?;
-                self.consume(&TokenType::Identifier, "Expected type")?;
+                self.parse_type()?;
                 if !self.match_token(&[TokenType::Comma]) {
                     break;
                 }
@@ -739,6 +774,12 @@ impl Parser {
                     right: Box::new(right),
                 };
                 continue;
+            }
+
+            // If token has no precedence (not a valid infix operator), break
+            let token_precedence = self.get_precedence(&token.typ);
+            if token_precedence == Precedence::None {
+                break;
             }
 
             self.advance();
@@ -975,7 +1016,8 @@ impl Parser {
             }
             TokenType::KwAsync => {
                 // async (params) -> { body } - async lambda
-                if self.check(&TokenType::LParen) && self.is_lambda_ahead() {
+                // Check: previous token is 'async' (already consumed), current is '('
+                if self.check(&TokenType::LParen) && self.is_async_lambda_ahead() {
                     let params = self.parse_lambda_params()?;
                     self.consume(&TokenType::Arrow, "Expected '->' after lambda params")?;
                     let body = self.parse_block()?;
@@ -1009,11 +1051,15 @@ impl Parser {
                     self.consume(&TokenType::RBrace, "Expected '}' after map literal")?;
                     Ok(Expr::Map(entries))
                 } else {
-                    // Set literal: { expr, expr, ... }
+                    // Set literal: { expr, expr, ... } or { expr; expr; ... }
                     let mut elements = Vec::new();
                     elements.push(first_expr);
-                    while self.match_token(&[TokenType::Comma]) {
-                        elements.push(self.parse_expression(Precedence::None)?);
+                    loop {
+                        if self.match_token(&[TokenType::Comma]) || self.match_token(&[TokenType::Semicolon]) {
+                            elements.push(self.parse_expression(Precedence::None)?);
+                        } else {
+                            break;
+                        }
                     }
                     self.consume(&TokenType::RBrace, "Expected '}' after set literal")?;
                     Ok(Expr::Set(elements))
@@ -1021,7 +1067,7 @@ impl Parser {
             }
             TokenType::LParen => {
                 // Could be: grouped expression, lambda, or tuple
-                if self.is_lambda_ahead() {
+                if self.is_lambda_ahead(1) {
                     let params = self.parse_lambda_params()?;
                     self.consume(&TokenType::Arrow, "Expected '->' after lambda params")?;
                     let body = self.parse_block()?;
@@ -1062,7 +1108,9 @@ impl Parser {
                 if !self.check(&TokenType::RSquare) {
                     loop {
                         elements.push(self.parse_expression(Precedence::None)?);
-                        if !self.match_token(&[TokenType::Comma]) {
+                        if self.match_token(&[TokenType::Comma]) || self.match_token(&[TokenType::Semicolon]) {
+                            // continue parsing
+                        } else {
                             break;
                         }
                     }
@@ -1180,7 +1228,7 @@ impl Parser {
                 let param_name =
                     self.consume(&TokenType::Identifier, "Expected parameter name")?;
                 let param_type = if self.match_token(&[TokenType::Colon]) {
-                    Some(self.consume(&TokenType::Identifier, "Expected type")?)
+                    Some(self.parse_type()?)
                 } else {
                     None
                 };
@@ -1206,22 +1254,58 @@ impl Parser {
     }
 
     /// Check if a lambda is ahead (lookahead for (params) -> pattern).
-    fn is_lambda_ahead(&self) -> bool {
-        let mut depth = 1;
+    /// Looks for the pattern: LParen ... RParen -> Arrow
+    fn is_lambda_ahead(&self, starting_depth: usize) -> bool {
+        let mut depth = starting_depth;
         let mut i = self.current;
 
         while i < self.tokens.len() && depth > 0 {
             match self.tokens[i].typ {
                 TokenType::LParen => depth += 1,
-                TokenType::RParen => depth -= 1,
+                TokenType::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // Found matching ) - check if next is ->
+                        return i + 1 < self.tokens.len()
+                            && self.tokens[i + 1].typ == TokenType::Arrow;
+                    }
+                }
                 TokenType::Eof => return false,
                 _ => {}
             }
             i += 1;
         }
 
-        // i is now past the RParen. Check if next token is Arrow.
-        i < self.tokens.len() && self.tokens[i].typ == TokenType::Arrow
+        false
+    }
+
+    /// Check if an async lambda is ahead: async (params) -> pattern.
+    /// This is called after consuming 'async', with current at '('.
+    fn is_async_lambda_ahead(&self) -> bool {
+        // We know: previous token is 'async', current is '('
+        // Find the matching ')' and check if '->' follows
+        let mut depth = 0; // Start at the '(' - first '(' increments to 1
+        let mut i = self.current;
+
+        while i < self.tokens.len() {
+            match self.tokens[i].typ {
+                TokenType::LParen => depth += 1,
+                TokenType::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // Found the matching ) of the lambda params
+                        // Return whether the next token is ->
+                        return i + 1 < self.tokens.len()
+                            && self.tokens[i + 1].typ == TokenType::Arrow;
+                    }
+                }
+                TokenType::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+
+        false
     }
 
     // === Helper methods ===
@@ -1291,6 +1375,32 @@ impl Parser {
         self.tokens[idx].typ == *typ
     }
 
+    /// Check if a token type can start an expression (prefix parsing).
+    fn is_expression_starter(&self, typ: TokenType) -> bool {
+        matches!(
+            typ,
+            TokenType::Identifier
+                | TokenType::KwInt
+                | TokenType::KwDouble
+                | TokenType::KwString
+                | TokenType::KwTrue
+                | TokenType::KwFalse
+                | TokenType::KwNull
+                | TokenType::LParen
+                | TokenType::LSquare
+                | TokenType::LBrace
+                | TokenType::Minus
+                | TokenType::Bang
+                | TokenType::KwNot
+                | TokenType::Increment
+                | TokenType::Decrement
+                | TokenType::KwAsync
+                | TokenType::KwAwait
+                | TokenType::KwSpawn
+                | TokenType::InterpolationStart
+        )
+    }
+
     /// Synchronize the parser after an error (skip tokens until a synchronization point).
     fn synchronize(&mut self) {
         self.advance();
@@ -1323,13 +1433,13 @@ impl Precedence {
         match self {
             Precedence::None => 0,
             Precedence::Assignment => 10,
-            Precedence::Ternary => 15,
+            Precedence::Ternary => 14,
             Precedence::Elvis => 15,
             Precedence::Or => 20,
             Precedence::And => 30,
             Precedence::Is => 35,
-            Precedence::Comparison => 40,
-            Precedence::Has => 45,
+            Precedence::Has => 40,
+            Precedence::Comparison => 45,
             Precedence::Range => 55,
             Precedence::Term => 60,
             Precedence::Factor => 70,
@@ -1343,12 +1453,13 @@ impl Precedence {
         match val {
             0 => Precedence::None,
             10 => Precedence::Assignment,
-            15 => Precedence::Ternary,
+            14 => Precedence::Ternary,
+            15 => Precedence::Elvis,
             20 => Precedence::Or,
             30 => Precedence::And,
             35 => Precedence::Is,
-            40 => Precedence::Comparison,
-            45 => Precedence::Has,
+            40 => Precedence::Has,
+            45 => Precedence::Comparison,
             55 => Precedence::Range,
             60 => Precedence::Term,
             70 => Precedence::Factor,
@@ -1765,7 +1876,7 @@ mod tests {
 
     #[test]
     fn test_parse_named_argument() {
-        let stmts = parse("foo(x: 5)");
+        let stmts = parse("foo(x = 5)");
         match &stmts[0] {
             Stmt::Expr(Expr::Call { arguments, .. }) => {
                 assert!(matches!(&arguments[0], Expr::NamedArg { .. }));
