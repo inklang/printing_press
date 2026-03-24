@@ -87,6 +87,17 @@ impl ConstantFolder {
                 iterable: self.fold_expr(iterable),
                 body: Box::new(self.fold_stmt(*body)),
             },
+            Stmt::Class {
+                annotations,
+                name,
+                superclass,
+                body,
+            } => Stmt::Class {
+                annotations,
+                name,
+                superclass,
+                body: Box::new(self.fold_stmt(*body)),
+            },
             other => other,
         }
     }
