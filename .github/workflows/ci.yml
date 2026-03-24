@@ -11,8 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -23,16 +21,13 @@ jobs:
       - name: Run tests
         run: cargo test --lib
 
-  build-release:
-    needs: test
+  build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -48,9 +43,9 @@ jobs:
         run: |
           mkdir -p artifacts
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp target/release/printing_press.exe artifacts/printing_press.exe
+            cp target/release/printing_press.exe artifacts/
           else
-            cp target/release/printing_press artifacts/printing_press
+            cp target/release/printing_press artifacts/
           fi
 
       - name: Upload artifact
@@ -58,38 +53,3 @@ jobs:
         with:
           name: printing_press-${{ matrix.os }}
           path: artifacts/
-
-  create-release:
-    needs: build-release
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-
-      - name: Display structure of downloaded files
-        shell: bash
-        run: ls -laR artifacts/
-
-      - name: Create tag
-        run: |
-          TAG="v$(date +%Y%m%d)-$(echo ${{ github.sha }} | cut -c1-7)"
-          git tag $TAG
-          git push origin $TAG
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            artifacts/printing_press-ubuntu-latest/printing_press
-            artifacts/printing_press-windows-latest/printing_press.exe
-            artifacts/printing_press-macos-latest/printing_press
-          prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
