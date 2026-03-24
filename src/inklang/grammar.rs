@@ -93,6 +93,39 @@ pub fn load_grammar(path: &str) -> Result<GrammarPackage, CompileError> {
         .map_err(|e| CompileError::Compilation(format!("Failed to parse grammar JSON from '{}': {}", path, e)))
 }
 
+/// Auto-discover grammars by scanning:
+/// 1. `dist/grammar.ir.json` (project's own grammar)
+/// 2. `packages/*/dist/grammar.ir.json` (installed packages)
+pub fn discover_grammars() -> Option<MergedGrammar> {
+    let mut packages = Vec::new();
+
+    // Scan dist/grammar.ir.json
+    if let Ok(pkg) = load_grammar("dist/grammar.ir.json") {
+        packages.push(pkg);
+    }
+
+    // Scan packages/*/dist/grammar.ir.json
+    if let Ok(entries) = std::fs::read_dir("packages") {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let pkg_path = entry.path();
+            if pkg_path.is_dir() {
+                let grammar_path = pkg_path.join("dist/grammar.ir.json");
+                if grammar_path.exists() {
+                    if let Ok(pkg) = load_grammar(grammar_path.to_str().unwrap_or("")) {
+                        packages.push(pkg);
+                    }
+                }
+            }
+        }
+    }
+
+    if packages.is_empty() {
+        None
+    } else {
+        Some(merge_grammars(packages))
+    }
+}
+
 /// Merge multiple grammar packages into a single MergedGrammar.
 /// Keywords are deduplicated via sort+dedup.
 pub fn merge_grammars(packages: Vec<GrammarPackage>) -> MergedGrammar {
