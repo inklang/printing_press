@@ -44,6 +44,7 @@ fn keywords() -> HashMap<&'static str, TokenType> {
         ("next", TokenType::KwNext),
         ("enum", TokenType::KwEnum),
         ("class", TokenType::KwClass),
+        ("extends", TokenType::KwExtends),
         ("import", TokenType::KwImport),
         ("from", TokenType::KwFrom),
         ("is", TokenType::KwIs),
@@ -573,6 +574,13 @@ mod tests {
     fn test_tokenize_arrow() {
         let tokens = tokenize("->");
         assert_eq!(tokens[0].typ, TokenType::Arrow);
+    }
+
+    #[test]
+    fn test_tokenize_extends() {
+        let tokens = tokenize("class Foo extends Bar {}");
+        let extends_token = tokens.iter().find(|t| t.lexeme == "extends").unwrap();
+        assert_eq!(extends_token.typ, TokenType::KwExtends);
     }
 
     #[test]
