@@ -143,12 +143,12 @@ impl SerialChunk {
         }
     }
 
-    pub fn to_chunk(&self) -> Chunk {
+    pub fn to_chunk(&self) -> Result<Chunk, crate::inklang::error::Error> {
         let mut chunk = Chunk::new();
         chunk.code = self.code.clone();
         chunk.constants = self.constants.iter().map(SerialValue::to_value).collect();
         chunk.strings = self.strings.clone();
-        chunk.functions = self.functions.iter().map(|f| Box::new(f.to_chunk())).collect();
+        chunk.functions = self.functions.iter().map(|f| Box::new(f.to_chunk().unwrap())).collect();
         chunk.classes = self.classes.iter().map(|c| ClassInfo {
             name: c.name.clone(),
             super_class: c.super_class.clone(),
@@ -156,11 +156,12 @@ impl SerialChunk {
         }).collect();
         chunk.function_defaults = self.function_defaults.iter().map(|fd| FunctionDefaults { default_chunks: fd.clone() }).collect();
         for (k, v) in &self.function_upvalues {
-            chunk.function_upvalues.insert(k.parse().unwrap(), (v.count, v.regs.clone()));
+            let key = k.parse::<usize>().map_err(|_| crate::inklang::error::Error::Parse(format!("Invalid upvalue key: {}", k)))?;
+            chunk.function_upvalues.insert(key, (v.count, v.regs.clone()));
         }
         chunk.spill_slot_count = self.spill_slot_count;
         // cst_table is not deserialized (empty in Rust)
-        chunk
+        Ok(chunk)
     }
 }
 

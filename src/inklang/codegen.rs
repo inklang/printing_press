@@ -43,32 +43,6 @@ impl IrCompiler {
         chunk
     }
 
-    /// Compile a method with full pipeline (SSA, liveness, register alloc, spill).
-    fn compile_method(&mut self, method_info: &MethodInfo) -> CompiledMethod {
-        let ssa_result = ssa::optimized_ssa_round_trip(
-            method_info.instrs.clone(),
-            method_info.constants.clone(),
-            method_info.arity,
-        );
-
-        let ranges = LivenessAnalyzer::new().analyze(&ssa_result.instrs);
-        let mut allocator = RegisterAllocator::new();
-        let alloc = allocator.allocate(&ranges, method_info.arity);
-        let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
-
-        let lowered_result = LoweredResult {
-            instrs: resolved,
-            constants: ssa_result.constants,
-            arity: method_info.arity,
-        };
-
-        let chunk = self.compile(lowered_result);
-
-        CompiledMethod {
-            chunk,
-            spill_slot_count: alloc.spill_slot_count,
-        }
-    }
 }
 
 impl Default for IrCompiler {
@@ -217,14 +191,13 @@ fn emit_instr(chunk: &mut Chunk, instr: &IrInstr, label_offsets: &HashMap<usize,
             let method_names: Vec<String> = methods.keys().cloned().collect();
             let method_start_index = chunk.functions.len();
 
-            for method_name in &method_names {
+            for _method_name in &method_names {
                 chunk.functions.push(Box::new(Chunk::new()));
             }
 
             // Compile all methods
             let mut compiled_methods: HashMap<String, CompiledMethod> = HashMap::new();
             for (method_name, method_info) in methods {
-                let compiler = IrCompiler::new();
                 // Note: in Rust we compile sequentially; parallel compilation would require more setup
                 let result = compile_method_sequential(method_info);
                 compiled_methods.insert(method_name.clone(), result);
@@ -249,30 +222,11 @@ fn emit_instr(chunk: &mut Chunk, instr: &IrInstr, label_offsets: &HashMap<usize,
             });
             chunk.write(OpCode::BuildClass, *dst, 0, 0, class_idx);
         }
-        IrInstr::LoadFunc { dst, name, arity: _, instrs, constants, default_values, captured_vars, upvalue_regs: _ } => {
+        IrInstr::LoadFunc { dst, name: _, arity: _, instrs, constants, default_values, captured_vars, upvalue_regs: _ } => {
             // Compile the function body
-            let ssa_result = ssa::optimized_ssa_round_trip(
-                instrs.clone(),
-                constants.clone(),
-                0, // arity
-            );
-            let ranges = LivenessAnalyzer::new().analyze(&ssa_result.instrs);
-            let mut allocator = RegisterAllocator::new();
-            let alloc = allocator.allocate(&ranges, 0);
-            let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
-
-            let lowered_result = LoweredResult {
-                instrs: resolved,
-                constants: ssa_result.constants,
-                arity: 0,
-            };
-
-            let mut func_compiler = IrCompiler::new();
-            let mut func_chunk = func_compiler.compile(lowered_result);
-            func_chunk.spill_slot_count = alloc.spill_slot_count;
-
+            let compiled = compile_function_body(instrs, constants, 0);
             let idx = chunk.functions.len();
-            chunk.functions.push(Box::new(func_chunk));
+            chunk.functions.push(Box::new(compiled.chunk));
 
             // Store upvalue info
             if !captured_vars.is_empty() {
@@ -282,27 +236,9 @@ fn emit_instr(chunk: &mut Chunk, instr: &IrInstr, label_offsets: &HashMap<usize,
             // Compile default value expressions
             let default_chunk_indices: Vec<Option<usize>> = default_values.iter().map(|default_info| {
                 if let Some(info) = default_info {
-                    let ssa_result = ssa::optimized_ssa_round_trip(
-                        info.instrs.clone(),
-                        info.constants.clone(),
-                        0,
-                    );
-                    let ranges = LivenessAnalyzer::new().analyze(&ssa_result.instrs);
-                    let mut allocator = RegisterAllocator::new();
-                    let alloc = allocator.allocate(&ranges, 0);
-                    let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
-
-                    let lowered_result = LoweredResult {
-                        instrs: resolved,
-                        constants: ssa_result.constants,
-                        arity: 0,
-                    };
-
-                    let mut default_compiler = IrCompiler::new();
-                    let mut default_chunk = default_compiler.compile(lowered_result);
-                    default_chunk.spill_slot_count = alloc.spill_slot_count;
+                    let compiled = compile_function_body(&info.instrs, &info.constants, 0);
                     let default_idx = chunk.functions.len();
-                    chunk.functions.push(Box::new(default_chunk));
+                    chunk.functions.push(Box::new(compiled.chunk));
                     Some(default_idx)
                 } else {
                     None
@@ -351,27 +287,9 @@ fn emit_instr(chunk: &mut Chunk, instr: &IrInstr, label_offsets: &HashMap<usize,
         IrInstr::CallHandler { handler_name: _, block_bodies } => {
             // Compile each block body into chunk.functions
             let func_indices: Vec<usize> = block_bodies.iter().map(|(body_instrs, body_constants)| {
-                let ssa_result = ssa::optimized_ssa_round_trip(
-                    body_instrs.clone(),
-                    body_constants.clone(),
-                    0,
-                );
-                let ranges = LivenessAnalyzer::new().analyze(&ssa_result.instrs);
-                let mut allocator = RegisterAllocator::new();
-                let alloc = allocator.allocate(&ranges, 0);
-                let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
-
-                let lowered_result = LoweredResult {
-                    instrs: resolved,
-                    constants: ssa_result.constants,
-                    arity: 0,
-                };
-
-                let mut handler_compiler = IrCompiler::new();
-                let mut handler_chunk = handler_compiler.compile(lowered_result);
-                handler_chunk.spill_slot_count = alloc.spill_slot_count;
+                let compiled = compile_function_body(body_instrs, body_constants, 0);
                 let idx = chunk.functions.len();
-                chunk.functions.push(Box::new(handler_chunk));
+                chunk.functions.push(Box::new(compiled.chunk));
                 idx
             }).collect();
 
@@ -386,25 +304,29 @@ fn emit_instr(chunk: &mut Chunk, instr: &IrInstr, label_offsets: &HashMap<usize,
 
 /// Compile a method sequentially (used instead of ForkJoinPool in Rust).
 fn compile_method_sequential(method_info: &MethodInfo) -> CompiledMethod {
+    compile_function_body(&method_info.instrs, &method_info.constants, method_info.arity)
+}
+
+/// Compile a function body through the full pipeline: SSA, liveness, register alloc, spill.
+fn compile_function_body(instrs: &[IrInstr], constants: &[Value], arity: usize) -> CompiledMethod {
     let ssa_result = ssa::optimized_ssa_round_trip(
-        method_info.instrs.clone(),
-        method_info.constants.clone(),
-        method_info.arity,
+        instrs.to_vec(),
+        constants.to_vec(),
+        arity,
     );
 
     let ranges = LivenessAnalyzer::new().analyze(&ssa_result.instrs);
     let mut allocator = RegisterAllocator::new();
-    let alloc = allocator.allocate(&ranges, method_info.arity);
+    let alloc = allocator.allocate(&ranges, arity);
     let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
 
     let lowered_result = LoweredResult {
         instrs: resolved,
         constants: ssa_result.constants,
-        arity: method_info.arity,
+        arity,
     };
 
-    let mut compiler = IrCompiler::new();
-    let chunk = compiler.compile(lowered_result);
+    let chunk = IrCompiler::new().compile(lowered_result);
 
     CompiledMethod {
         chunk,
