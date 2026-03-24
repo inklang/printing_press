@@ -39,7 +39,7 @@ impl SsaConstantPropagationPass {
     fn evaluate_phi(&self, phi: &PhiFunction) -> Option<Value> {
         let mut const_value: Option<&Value> = None;
         for (_, operand) in &phi.operands {
-            if operand.base_reg == 0 && operand.version == 0 {
+            if operand.is_undefined() {
                 // Undefined value
                 return None;
             }
