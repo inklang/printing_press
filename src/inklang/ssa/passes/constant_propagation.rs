@@ -274,6 +274,8 @@ impl SsaOptPass for SsaConstantPropagationPass {
         }
 
         // Apply optimizations: replace constant expressions with LoadImm
+        // Track whether we actually modified anything
+        let mut any_modified = false;
         let new_blocks: Vec<SsaBlock> = ssa_func
             .blocks
             .iter()
@@ -282,10 +284,23 @@ impl SsaOptPass for SsaConstantPropagationPass {
                     // Keep unreachable blocks as-is (they'll be removed by DCE)
                     block.clone()
                 } else {
-                    self.optimize_block(block)
+                    let optimized = self.optimize_block(block);
+                    // Check if we actually modified anything
+                    if optimized.instrs.len() != block.instrs.len() {
+                        any_modified = true;
+                    }
+                    optimized
                 }
             })
             .collect();
+
+        // Only return changed=true if we actually modified something
+        if !any_modified {
+            return SsaOptResult {
+                func: ssa_func,
+                changed: false,
+            };
+        }
 
         let new_func = SsaFunction::new(
             new_blocks,

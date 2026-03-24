@@ -1,1 +1,0 @@
-std::iter::Map<std::slice::Iter<'_, Box<Chunk>>, for<'a> fn(&'a Chunk) -> SerialChunk {SerialChunk::from_chunk}>

@@ -473,7 +473,7 @@ impl<'a> Lexer<'a> {
             typ,
             lexeme: text,
             line: self.line,
-            column: self.column - len,
+            column: self.column.saturating_sub(len),
         });
     }
 }
