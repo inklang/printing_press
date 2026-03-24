@@ -40,11 +40,46 @@ pub enum CompileError {
 }
 
 /// Compile Inklang source code to a SerialScript (JSON).
+/// Grammar is auto-discovered from dist/ and packages/*/dist/.
 ///
 /// # Pipeline
-/// 1. Tokenize → 2. Parse → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 7. Codegen → 8. Serialize
+/// 1. Tokenize → 2. Parse (auto-grammar) → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 7. Codegen → 8. Serialize
 pub fn compile(source: &str, name: &str) -> Result<SerialScript, CompileError> {
-    compile_with_grammar(source, name, None)
+    let grammar = auto_discover_grammar();
+    compile_with_grammar(source, name, grammar.as_ref())
+}
+
+/// Auto-discover grammar files from the project convention:
+/// - dist/grammar.ir.json         (current package)
+/// - packages/*/dist/grammar.ir.json  (installed packages)
+fn auto_discover_grammar() -> Option<MergedGrammar> {
+    use std::fs;
+
+    let mut packages: Vec<grammar::GrammarPackage> = Vec::new();
+
+    // Load dist/grammar.ir.json (current package)
+    if let Ok(pkg) = grammar::load_grammar("dist/grammar.ir.json") {
+        packages.push(pkg);
+    }
+
+    // Scan packages/*/dist/grammar.ir.json (installed packages)
+    if let Ok(entries) = fs::read_dir("packages") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let grammar_path = path.join("dist/grammar.ir.json");
+                if let Ok(pkg) = grammar::load_grammar(grammar_path.to_str().unwrap_or("")) {
+                    packages.push(pkg);
+                }
+            }
+        }
+    }
+
+    if packages.is_empty() {
+        None
+    } else {
+        Some(grammar::merge_grammars(packages))
+    }
 }
 
 /// Compile Inklang source code with a grammar to a SerialScript (JSON).
