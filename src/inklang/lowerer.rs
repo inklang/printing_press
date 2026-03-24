@@ -21,6 +21,8 @@ pub struct LoweredResult {
     pub constants: Vec<Value>,
     /// Nested functions defined within this scope.
     pub functions: Vec<LoweredResult>,
+    /// Arity of the function (number of parameters).
+    pub arity: usize,
 }
 
 /// AST lowerer - transforms AST into IR.
@@ -86,6 +88,7 @@ impl AstLowerer {
             instrs: self.instrs.clone(),
             constants: self.constants.clone(),
             functions: std::mem::take(&mut self.functions),
+            arity: 0, // Top-level script has no parameters
         }
     }
 
@@ -664,6 +667,7 @@ impl AstLowerer {
                         instrs: result.instrs,
                         constants: result.constants,
                         functions: vec![],
+                        arity: data_params.len() + 1, // +1 for implicit event param
                     });
 
                     self.emit(IrInstr::RegisterEventHandler {
@@ -713,6 +717,7 @@ impl AstLowerer {
             instrs: result.instrs,
             constants: result.constants,
             functions: vec![],
+            arity: data_params.len() + 1, // +1 for implicit event param
         });
 
         self.emit(IrInstr::RegisterEventHandler {
