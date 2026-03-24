@@ -45,10 +45,12 @@ impl SpillInserter {
 
         let mut result: Vec<IrInstr> = Vec::with_capacity(instrs.len() * 2);
 
-        for (i, instr) in instrs.into_iter().enumerate() {
-            // Per-instruction: track which temp regs have been claimed
-            let mut claimed_temps: HashSet<usize> = HashSet::new();
+        // Track which temp regs have been claimed across instructions.
+        // When we UNSPILL, we claim a temp (it holds a spilled value until we SPILL).
+        // When we SPILL, we're done with that spilled value and free the temp.
+        let mut claimed_temps: HashSet<usize> = HashSet::new();
 
+        for (i, instr) in instrs.into_iter().enumerate() {
             // Pre and post instructions for this original instruction
             let mut pre_instrs: Vec<IrInstr> = Vec::new();
             let mut post_instrs: Vec<IrInstr> = Vec::new();
@@ -105,6 +107,8 @@ impl SpillInserter {
                 if let Some(&slot) = spills.get(&reg) {
                     if let Some(temp) = pick_temp(live_phys_at, claimed_temps, num_regs) {
                         post_instrs.push(IrInstr::Spill { slot, src: temp });
+                        // SPILL means we're done with this spilled value - free the temp
+                        claimed_temps.remove(&temp);
                         temp
                     } else {
                         panic!(
