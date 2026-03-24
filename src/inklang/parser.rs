@@ -82,8 +82,8 @@ impl<'a> Parser<'a> {
             match self.parse_statement() {
                 Ok(stmt) => statements.push(stmt),
                 Err(e) => {
-                    eprintln!("Parse error: {}", e);
                     self.synchronize();
+                    return Err(e);
                 }
             }
         }
