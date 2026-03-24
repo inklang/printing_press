@@ -24,17 +24,31 @@ use lowerer::AstLowerer;
 use parser::Parser;
 use register_alloc::RegisterAllocator;
 use spill_insert::SpillInserter;
+use thiserror::Error;
+
+/// Compile error types.
+#[derive(Debug, Error)]
+pub enum CompileError {
+    #[error("Lexing error: {0}")]
+    Lexing(String),
+    #[error("Parsing error: {0}")]
+    Parsing(String),
+    #[error("Compilation error: {0}")]
+    Compilation(String),
+}
 
 /// Compile Inklang source code to a SerialScript (JSON).
 ///
 /// # Pipeline
 /// 1. Tokenize → 2. Parse → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 7. Codegen → 8. Serialize
-pub fn compile(source: &str, name: &str) -> SerialScript {
+pub fn compile(source: &str, name: &str) -> Result<SerialScript, CompileError> {
     // 1. Tokenize
     let tokens = lexer::tokenize(source);
 
     // 2. Parse
-    let ast = Parser::new(tokens).parse().expect("Parse error");
+    let ast = Parser::new(tokens)
+        .parse()
+        .map_err(|e| CompileError::Parsing(e.to_string()))?;
 
     // 3. Constant fold
     let folded = ConstantFolder::new().fold(&ast);
@@ -65,5 +79,5 @@ pub fn compile(source: &str, name: &str) -> SerialScript {
     let chunk = compiler.compile(codegen_result);
 
     // 8. Serialize
-    SerialScript::from_chunk(name, &chunk)
+    Ok(SerialScript::from_chunk(name, &chunk))
 }

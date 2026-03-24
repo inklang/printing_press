@@ -15,7 +15,7 @@ use printing_press::compile;
 #[test]
 fn test_compile_function_exists_and_works_on_empty_string() {
     // The compile function exists and works on empty input
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     assert_eq!(result.name, "test");
 }
 
@@ -23,7 +23,7 @@ fn test_compile_function_exists_and_works_on_empty_string() {
 fn test_empty_script_produces_valid_json() {
     // Empty script should compile without hanging
     let source = "";
-    let result = compile(source, "empty_test");
+    let result = compile(source, "empty_test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
 
     // Should produce valid JSON
@@ -38,7 +38,7 @@ fn test_empty_script_produces_valid_json() {
 #[test]
 fn test_json_has_required_fields() {
     // Verify the JSON structure has all expected top-level fields
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string_pretty(&result).unwrap();
 
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -52,7 +52,7 @@ fn test_json_has_required_fields() {
 #[test]
 fn test_chunk_has_required_fields() {
     // Verify chunk has all expected fields
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
 
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -73,7 +73,7 @@ fn test_chunk_has_required_fields() {
 #[test]
 fn test_cst_table_is_empty() {
     // CST table should always be empty in Rust implementation
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -87,7 +87,7 @@ fn test_cst_table_is_empty() {
 #[test]
 fn test_constants_is_array() {
     // Constants should be an array
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -98,7 +98,7 @@ fn test_constants_is_array() {
 #[test]
 fn test_code_is_array() {
     // Code should be an array
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -109,7 +109,7 @@ fn test_code_is_array() {
 #[test]
 fn test_strings_is_array() {
     // Strings should be an array
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -120,7 +120,7 @@ fn test_strings_is_array() {
 #[test]
 fn test_functions_is_array() {
     // Functions should be an array
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -131,7 +131,7 @@ fn test_functions_is_array() {
 #[test]
 fn test_classes_is_array() {
     // Classes should be an array
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -142,7 +142,7 @@ fn test_classes_is_array() {
 #[test]
 fn test_function_defaults_is_array() {
     // functionDefaults should be an array
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -153,7 +153,7 @@ fn test_function_defaults_is_array() {
 #[test]
 fn test_function_upvalues_is_object() {
     // functionUpvalues should be an object (map)
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -164,7 +164,7 @@ fn test_function_upvalues_is_object() {
 #[test]
 fn test_spill_slot_count_is_number() {
     // spillSlotCount should be a number
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -175,7 +175,7 @@ fn test_spill_slot_count_is_number() {
 #[test]
 fn test_config_definitions_is_object() {
     // configDefinitions should be an object (map)
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -195,7 +195,7 @@ fn test_name_matches_provided_name() {
     ];
 
     for name in test_cases {
-        let result = compile("", name);
+        let result = compile("", name).unwrap();
         assert_eq!(result.name, name, "Name should match provided name");
 
         let json = serde_json::to_string(&result).unwrap();
@@ -207,7 +207,7 @@ fn test_name_matches_provided_name() {
 #[test]
 fn test_json_can_be_pretty_printed() {
     // Verify JSON can be pretty printed
-    let result = compile("", "test");
+    let result = compile("", "test").unwrap();
     let pretty = serde_json::to_string_pretty(&result);
     assert!(pretty.is_ok(), "Should be able to pretty print JSON");
 
