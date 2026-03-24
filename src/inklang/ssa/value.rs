@@ -23,11 +23,12 @@ impl SsaValue {
 
     /// Represents an undefined/placeholder SSA value.
     /// Used during phi placement before renaming.
-    pub const UNDEFINED: SsaValue = SsaValue { base_reg: 0, version: 0 };
+    /// Uses usize::MAX as sentinel to avoid conflicting with valid SSA values.
+    pub const UNDEFINED: SsaValue = SsaValue { base_reg: usize::MAX, version: usize::MAX };
 
     /// Check if this value is the undefined value.
     pub fn is_undefined(&self) -> bool {
-        self.base_reg == 0 && self.version == 0
+        self.base_reg == usize::MAX && self.version == usize::MAX
     }
 }
 

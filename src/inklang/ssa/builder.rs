@@ -96,10 +96,23 @@ impl DominanceFrontier {
                 }
 
                 // Find intersection of predecessors' dominators
+                let intersect_fn = |a: usize, b: usize| -> usize {
+                    let mut a = a;
+                    let mut b = b;
+                    while a != b {
+                        while a > b {
+                            a = *idoms.get(&a).unwrap_or(&a);
+                        }
+                        while b > a {
+                            b = *idoms.get(&b).unwrap_or(&b);
+                        }
+                    }
+                    a
+                };
                 let mut new_idom: Option<usize> = None;
                 for &pred_id in &block.predecessors {
                     if let Some(&pred_idom) = idoms.get(&pred_id) {
-                        new_idom = Some(new_idom.map_or(pred_idom, |cur| intersect(cur, pred_idom)));
+                        new_idom = Some(new_idom.map_or(pred_idom, |cur| intersect_fn(cur, pred_idom)));
                     }
                 }
 
@@ -174,28 +187,6 @@ impl DominanceFrontier {
         }
         children
     }
-}
-
-/// Find intersection of two paths in the dominator tree.
-fn intersect(a: usize, b: usize) -> usize {
-    let mut a_path: Vec<usize> = Vec::new();
-    let mut b_path: Vec<usize> = Vec::new();
-    let mut a_curr = Some(a);
-    let mut b_curr = Some(b);
-
-    while let Some(x) = a_curr {
-        a_path.push(x);
-        b_curr = Some(b);
-        while let Some(y) = b_curr {
-            if x == y {
-                return x;
-            }
-            b_curr = None; // Simplified: just compare directly
-        }
-        a_curr = None;
-    }
-
-    a_path.last().copied().unwrap_or(a)
 }
 
 impl SsaBuilder {
@@ -477,10 +468,10 @@ impl SsaBuilder {
             let idf = self.dom_frontier.iterated_frontier(&def_block_set);
 
             for &block_id in &idf {
-                // Only add phi if block has multiple predecessors
+                // Add phi if block has at least one predecessor
                 if let Some(&ssa_block_idx) = self.block_map.get(&block_id) {
                     let ssa_block = &mut self.ssa_blocks[ssa_block_idx];
-                    if ssa_block.predecessors.len() >= 2 {
+                    if ssa_block.predecessors.len() >= 1 {
                         // Create phi with placeholder operands (will be filled during renaming)
                         let mut operands = HashMap::new();
                         for &pred_id in &ssa_block.predecessors {
@@ -753,6 +744,13 @@ impl SsaBuilder {
                 *defined_value = SsaValue::new(base_reg, new_version);
                 *push_counts.entry(base_reg).or_default() += 1;
             }
+            SsaInstr::HasCheck { defined_value, obj, .. } => {
+                *obj = get_current_value(obj.base_reg, stacks);
+                let base_reg = defined_value.base_reg;
+                let new_version = new_version(base_reg, counters, stacks);
+                *defined_value = SsaValue::new(base_reg, new_version);
+                *push_counts.entry(base_reg).or_default() += 1;
+            }
             SsaInstr::LoadClass { defined_value, .. } => {
                 let base_reg = defined_value.base_reg;
                 let new_version = new_version(base_reg, counters, stacks);
@@ -933,11 +931,10 @@ fn convert_instr(instr: &IrInstr) -> Option<super::block::SsaInstr> {
             })
         }
         IR::HasCheck { dst, obj, field_name } => {
-            // HasCheck becomes IsType with the field_name as the type_name
-            Some(SsaInstr::IsType {
+            Some(SsaInstr::HasCheck {
                 defined_value: SsaValue::new(*dst, 0),
-                src: SsaValue::new(*obj, 0),
-                type_name: field_name.clone(),
+                obj: SsaValue::new(*obj, 0),
+                field_name: field_name.clone(),
             })
         }
         IR::LoadClass { dst, name, super_class, methods } => {

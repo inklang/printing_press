@@ -87,7 +87,7 @@ impl SsaDeconstructor {
             }
             for phi in &block.phi_functions {
                 for (&pred_id, &src_value) in &phi.operands {
-                    if src_value.base_reg == 0 && src_value.version == 0 {
+                    if src_value.base_reg == usize::MAX && src_value.version == usize::MAX {
                         // Skip undefined values
                         continue;
                     }
@@ -258,9 +258,9 @@ impl SsaDeconstructor {
             }
         }
 
-        // Handle undefined values
-        if !self.reg_map.contains_key(&(0, 0)) {
-            self.reg_map.insert((0, 0), self.next_reg);
+        // Handle undefined values (uses usize::MAX as sentinel)
+        if !self.reg_map.contains_key(&(usize::MAX, usize::MAX)) {
+            self.reg_map.insert((usize::MAX, usize::MAX), self.next_reg);
             self.next_reg += 1;
         }
     }
@@ -391,6 +391,13 @@ impl SsaDeconstructor {
                     dst: self.map_reg(defined_value),
                     src: self.map_reg(src),
                     type_name: type_name.clone(),
+                })
+            }
+            SsaInstr::HasCheck { defined_value, obj, field_name } => {
+                Some(IR::HasCheck {
+                    dst: self.map_reg(defined_value),
+                    obj: self.map_reg(obj),
+                    field_name: field_name.clone(),
                 })
             }
             SsaInstr::LoadClass { defined_value, name, super_class, methods } => {

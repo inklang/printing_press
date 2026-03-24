@@ -189,6 +189,14 @@ pub enum SsaInstr {
         type_name: String,
     },
 
+    /// Field existence check (has operator).
+    /// `dst = obj has fieldName`
+    HasCheck {
+        defined_value: SsaValue,
+        obj: SsaValue,
+        field_name: String,
+    },
+
     /// Load a class definition.
     LoadClass {
         defined_value: SsaValue,
@@ -233,6 +241,7 @@ impl SsaInstr {
             SsaInstr::SetField { .. } => None,
             SsaInstr::NewInstance { defined_value, .. } => Some(*defined_value),
             SsaInstr::IsType { defined_value, .. } => Some(*defined_value),
+            SsaInstr::HasCheck { defined_value, .. } => Some(*defined_value),
             SsaInstr::LoadClass { defined_value, .. } => Some(*defined_value),
             SsaInstr::Break => None,
             SsaInstr::Next => None,
@@ -270,6 +279,7 @@ impl SsaInstr {
                 vals
             }
             SsaInstr::IsType { src, .. } => vec![*src],
+            SsaInstr::HasCheck { obj, .. } => vec![*obj],
             SsaInstr::LoadClass { .. } => vec![],
             SsaInstr::Break => vec![],
             SsaInstr::Next => vec![],
@@ -337,6 +347,9 @@ impl fmt::Display for SsaInstr {
             }
             SsaInstr::IsType { defined_value, src, type_name } => {
                 write!(f, "{} = {} is {}", defined_value, src, type_name)
+            }
+            SsaInstr::HasCheck { defined_value, obj, field_name } => {
+                write!(f, "{} = {} has {}", defined_value, obj, field_name)
             }
             SsaInstr::LoadClass { defined_value, name, .. } => {
                 write!(f, "{} = LoadClass {}", defined_value, name)
