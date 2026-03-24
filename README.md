@@ -18,6 +18,35 @@ printing_press --version
 printing_press --help
 ```
 
+## CLI Reference
+
+### Single-File Compilation
+
+```bash
+printing_press compile <input.ink> -o <output.json> [--debug]
+```
+
+### Batch Compilation
+
+```bash
+printing_press compile --sources <dir> --out <dir> [--debug]
+```
+
+Scan a directory of `.ink` files and compile each to `.inkc`. Grammars are auto-discovered from `dist/grammar.ir.json` and `packages/*/dist/grammar.ir.json`.
+
+**Arguments:**
+- `--sources <dir>` — Directory containing `.ink` source files
+- `--out <dir>` — Output directory for compiled `.inkc` files
+- `--debug` — Pretty-print JSON output
+- `-o <file>` — Output file (single-file mode only)
+
+**Grammar Auto-Discovery:**
+The compiler scans for grammars in:
+1. `dist/grammar.ir.json` (project's own grammar)
+2. `packages/*/dist/grammar.ir.json` (installed packages)
+
+No `--grammar` flags needed — grammars are discovered automatically when the compiler runs from the project root directory.
+
 ## Installation
 
 ```bash
