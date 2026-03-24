@@ -170,6 +170,7 @@ pub enum Stmt {
     Expr(Expr),
     /// Let binding: let x = 5
     Let {
+        annotations: Vec<Expr>,
         name: Token,
         type_annot: Option<Token>,
         value: Expr,
@@ -207,6 +208,7 @@ pub enum Stmt {
     Next,
     /// Function declaration
     Fn {
+        annotations: Vec<Expr>,
         name: Token,
         params: Vec<Param>,
         return_type: Option<Token>,
@@ -215,6 +217,7 @@ pub enum Stmt {
     },
     /// Class declaration
     Class {
+        annotations: Vec<Expr>,
         name: Token,
         superclass: Option<Token>,
         body: Box<Stmt>,
@@ -399,6 +402,7 @@ mod tests {
     #[test]
     fn test_stmt_let() {
         let stmt = Stmt::Let {
+            annotations: vec![],
             name: Token {
                 typ: TokenType::Identifier,
                 lexeme: "x".into(),
@@ -492,6 +496,7 @@ mod tests {
     #[test]
     fn test_stmt_fn() {
         let stmt = Stmt::Fn {
+            annotations: vec![],
             name: Token {
                 typ: TokenType::Identifier,
                 lexeme: "add".into(),
@@ -509,6 +514,7 @@ mod tests {
     #[test]
     fn test_stmt_class() {
         let stmt = Stmt::Class {
+            annotations: vec![],
             name: Token {
                 typ: TokenType::Identifier,
                 lexeme: "MyClass".into(),
