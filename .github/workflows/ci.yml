@@ -61,7 +61,7 @@ jobs:
         if: github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.sha }}
+          tag_name: v0.0.${{ github.run_number }}
           files: artifacts/*
           generate_release_notes: true
         env:
