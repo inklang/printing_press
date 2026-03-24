@@ -14,7 +14,7 @@ fn test_stage_1_lexer_simple() {
 fn test_stage_2_parser_simple() {
     let source = "let x = 5";
     let tokens = lexer::tokenize(source);
-    let ast = Parser::new(tokens).parse().expect("Parse error");
+    let ast = Parser::new(tokens, None).parse().expect("Parse error");
     println!("AST stmts: {:?}", ast.len());
     assert!(!ast.is_empty());
 }
@@ -23,7 +23,7 @@ fn test_stage_2_parser_simple() {
 fn test_stage_3_constant_fold_simple() {
     let source = "let x = 5";
     let tokens = lexer::tokenize(source);
-    let ast = Parser::new(tokens).parse().expect("Parse error");
+    let ast = Parser::new(tokens, None).parse().expect("Parse error");
     let folded = ConstantFolder::new().fold(&ast);
     println!("Folded stmts: {:?}", folded.len());
     assert!(!folded.is_empty());
@@ -33,7 +33,7 @@ fn test_stage_3_constant_fold_simple() {
 fn test_stage_4_lower_simple() {
     let source = "let x = 5";
     let tokens = lexer::tokenize(source);
-    let ast = Parser::new(tokens).parse().expect("Parse error");
+    let ast = Parser::new(tokens, None).parse().expect("Parse error");
     let folded = ConstantFolder::new().fold(&ast);
     let lowered = AstLowerer::new().lower(&folded);
     println!("Lowered instrs: {:?}", lowered.instrs.len());
@@ -44,7 +44,7 @@ fn test_stage_4_lower_simple() {
 fn test_stage_5_ssa_build_only() {
     let source = "let x = 5";
     let tokens = lexer::tokenize(source);
-    let ast = Parser::new(tokens).parse().expect("Parse error");
+    let ast = Parser::new(tokens, None).parse().expect("Parse error");
     let folded = ConstantFolder::new().fold(&ast);
     let lowered = AstLowerer::new().lower(&folded);
     println!("About to run SSA build on {} instrs", lowered.instrs.len());
@@ -57,7 +57,7 @@ fn test_stage_5_ssa_build_only() {
 fn test_stage_5_ssa_simple() {
     let source = "let x = 5";
     let tokens = lexer::tokenize(source);
-    let ast = Parser::new(tokens).parse().expect("Parse error");
+    let ast = Parser::new(tokens, None).parse().expect("Parse error");
     let folded = ConstantFolder::new().fold(&ast);
     let lowered = AstLowerer::new().lower(&folded);
     println!("About to run full SSA round-trip on {} instrs", lowered.instrs.len());

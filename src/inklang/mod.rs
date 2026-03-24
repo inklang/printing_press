@@ -14,11 +14,13 @@ pub mod spill_insert;
 pub mod codegen;
 pub mod chunk;
 pub mod serialize;
+pub mod grammar;
 
 pub use serialize::{SerialScript, SerialChunk, SerialValue, SerialConfigField};
 
 use codegen::IrCompiler;
 use constant_fold::ConstantFolder;
+use grammar::MergedGrammar;
 use liveness::LivenessAnalyzer;
 use lowerer::AstLowerer;
 use parser::Parser;
@@ -42,11 +44,19 @@ pub enum CompileError {
 /// # Pipeline
 /// 1. Tokenize → 2. Parse → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 7. Codegen → 8. Serialize
 pub fn compile(source: &str, name: &str) -> Result<SerialScript, CompileError> {
+    compile_with_grammar(source, name, None)
+}
+
+/// Compile Inklang source code with a grammar to a SerialScript (JSON).
+///
+/// # Pipeline
+/// 1. Tokenize → 2. Parse (with grammar) → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 7. Codegen → 8. Serialize
+pub fn compile_with_grammar(source: &str, name: &str, grammar: Option<&MergedGrammar>) -> Result<SerialScript, CompileError> {
     // 1. Tokenize
     let tokens = lexer::tokenize(source);
 
     // 2. Parse
-    let ast = Parser::new(tokens)
+    let ast = Parser::new(tokens, grammar)
         .parse()
         .map_err(|e| CompileError::Parsing(e.to_string()))?;
 

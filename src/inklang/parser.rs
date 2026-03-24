@@ -10,6 +10,7 @@ use super::ast::{
     TableField,
 };
 use super::error::{Error, Result};
+use super::grammar::MergedGrammar;
 use super::token::{Token, TokenType};
 use super::value::Value;
 
@@ -59,15 +60,19 @@ const ASSIGN_OPS: &[TokenType] = &[
 ];
 
 /// Pratt parser for Inklang source code.
-pub struct Parser {
+pub struct Parser<'a> {
     tokens: Vec<Token>,
     current: usize,
+    grammar: Option<&'a MergedGrammar>,
 }
 
-impl Parser {
+impl<'a> Parser<'a> {
     /// Create a new parser from a vector of tokens.
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, current: 0 }
+    /// If grammar is provided, Ref variants in rules can be resolved.
+    /// If grammar is None, Ref variants should be handled gracefully (they are
+    /// for plugin-defined grammars, not core language parsing).
+    pub fn new(tokens: Vec<Token>, grammar: Option<&'a MergedGrammar>) -> Self {
+        Parser { tokens, current: 0, grammar }
     }
 
     /// Parse the token stream into a list of statements.
@@ -1477,7 +1482,7 @@ mod tests {
 
     fn parse(source: &str) -> Vec<Stmt> {
         let tokens = crate::inklang::lexer::tokenize(source);
-        Parser::new(tokens).parse().unwrap()
+        Parser::new(tokens, None).parse().unwrap()
     }
 
     #[test]
