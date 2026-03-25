@@ -57,7 +57,7 @@ impl DominatorTree {
 }
 ```
 
-`CfgBlock` must be made `pub(super)` so that `dominance.rs` can accept it. In Rust, `pub(super)` on an item in `src/inklang/ssa/builder.rs` makes it visible to `src/inklang/ssa/mod.rs` and all sibling submodules declared there — including `dominance.rs`. No re-export in `mod.rs` is needed. It does not need to be public outside `ssa`.
+`CfgBlock` must be made `pub(crate)` so that `dominance.rs` can accept it. `pub(super)` would only guarantee visibility to the immediate parent module; `pub(crate)` unambiguously makes it accessible to any sibling submodule within the crate. It does not need to be part of the public API outside the crate.
 
 The `SsaBuilder` refactor replaces its private `DominanceFrontier` with `DominatorTree::from_cfg`. The `DominanceFrontier` struct and its `impl` block are **deleted entirely**. Optimization passes call `DominatorTree::from_ssa`.
 
@@ -175,6 +175,8 @@ for &child_id in dom_tree.children(block_id) {
 
 **Dominator-based value numbering (DVNT):** process blocks in **RPO order** (from `dom_tree.rpo()`). RPO guarantees every dominator appears before its dominated children. Each block inherits its immediate dominator's completed value table. Siblings never share tables — each child receives an independent clone of its idom's table.
 
+**`current_func` field removal:** `SsaGlobalValueNumberingPass` currently has a `current_func: Option<SsaFunction>` field that is set via `self.current_func = Some(ssa_func.clone())` at the start of `run` but is never read in `process_block`. This wasteful full-function clone must be removed as part of this refactor: delete the `current_func` field from the struct, its initialization in `new()`, and the assignment in `run`.
+
 ### Soundness: value table inheritance
 
 The existing `process_block` removes an entry from `value_table` when a side-effecting instruction invalidates its hash. The invariant maintained is: **entries in `value_table` at block exit are safe to reuse in dominated blocks** — any entry whose hash was invalidated mid-block has already been removed before the block's processing completes.
@@ -243,7 +245,7 @@ Builds `DominatorTree::from_ssa(&ssa_func)`, then iterates blocks in RPO order u
 Use `DominatorTree::from_ssa(func).back_edges()`. Group back edges by header: for each unique header `H`, collect all back-edge tails `{B₁, B₂, …}` that point to `H`.
 
 For each unique header `H`:
-- The **loop body** is the **union** of reverse-BFS bodies from each tail `Bᵢ` to `H`, plus `H` itself. Run reverse BFS from every `Bᵢ` simultaneously (or sequentially, unioning results), stopping at `H`.
+- The **loop body** is the **union** of reverse-BFS bodies from each tail `Bᵢ` to `H`, plus `H` itself. Run reverse BFS from every `Bᵢ` simultaneously (or sequentially, unioning results). **Stopping condition:** add `H` to the body set explicitly at the start; during BFS, when a predecessor of the current node equals `H`, do not enqueue `H` (it is already in the body set). This prevents escaping the loop by following `H`'s own predecessors.
 - This merged body is used for all subsequent steps (Step 2 invariant analysis, Step 3 pre-header insertion).
 
 Treating multiple back edges to the same header as separate independent loops is unsound: instructions in one sub-body may use values defined in another sub-body, making them loop-variant with respect to the full loop.
@@ -279,7 +281,7 @@ Append loop-invariant instructions to the pre-header in **topological dependency
 **Pre-header terminator protocol:** The pre-header's final instruction must be `SsaInstr::Jump { target: label }` where `label` is an `IrLabel` that appears as `SsaInstr::Label { label }` at the start of `H.instrs`. The exact steps:
 
 1. Scan `H.instrs` for the first `SsaInstr::Label { label }`. If found, use that `label` as the jump target.
-2. If `H.instrs` has no leading `Label` instruction, allocate a new one: scan all instructions in all blocks for the maximum `IrLabel` integer value, add 1 to get `new_label`, prepend `SsaInstr::Label { label: new_label }` to `H.instrs`, set `H.label = Some(new_label)` to keep the block's metadata consistent, and use `new_label` as the jump target.
+2. If `H.instrs` has no leading `Label` instruction, allocate a new one: scan all instructions in all blocks for the maximum `IrLabel` inner integer value (extracting the `usize` from each `IrLabel(n)` via `.0`), add 1 to get `new_id`, then construct `let new_label = IrLabel(new_id)`. Prepend `SsaInstr::Label { label: new_label }` to `H.instrs`, set `H.label = Some(new_label)` to keep the block's metadata consistent, and use `new_label` as the jump target.
 
 Append `SsaInstr::Jump { target }` as the last instruction of the pre-header block.
 
@@ -419,7 +421,7 @@ All existing 224 lib tests and 16 round-trip integration tests continue to pass 
 | File | Change |
 |---|---|
 | `src/inklang/ssa/dominance.rs` | New — `DominatorTree` with `from_ssa` and `from_cfg` |
-| `src/inklang/ssa/mod.rs` | Re-export `DominatorTree`; add LICM one-shot call inside `run_optimization_passes` (after DCE, before returning) |
+| `src/inklang/ssa/mod.rs` | Re-export `DominatorTree`; add `use passes::licm::SsaLicmPass;`; add LICM one-shot call inside `run_optimization_passes` (after DCE, before returning) |
 | `src/inklang/ssa/passes/mod.rs` | Add `pub mod licm` |
 | `src/inklang/ssa/passes/licm.rs` | New — `SsaLicmPass` |
 | `src/inklang/ssa/passes/gvn.rs` | Extend with DVNT inter-block propagation; enforce invalidation-removal invariant |
