@@ -6,7 +6,7 @@
 //! - Jump-to-next: `Jump { target: L }` where Label L immediately follows
 //!   (with only other Labels in between)
 
-use crate::inklang::ir::{IrInstr, IrLabel};
+use crate::inklang::ir::IrInstr;
 
 /// Run all peephole optimizations on a linear instruction stream.
 /// Returns a new Vec with wasteful instructions removed.
@@ -22,9 +22,15 @@ pub fn run(instrs: Vec<IrInstr>) -> Vec<IrInstr> {
             }
             // Drop unconditional jumps whose target label immediately follows
             // (with only Label instructions in between), but only if the jump
-            // itself is reachable (i.e., not after another unconditional Jump).
+            // itself is reachable.
+            //
+            // Reachability is detected by checking `output.last()`: because
+            // eliminated instructions are never pushed to `output`, the last
+            // emitted instruction is always the most recently *kept* instruction.
+            // If that is an unconditional Jump, control can never reach the
+            // current instruction, so we preserve it rather than silently hiding
+            // dead code (dead code elimination is a separate, future pass).
             IrInstr::Jump { target } => {
-                // Check if this jump is reachable by looking at the previous non-label instruction
                 let mut is_reachable = true;
                 if let Some(last_instr) = output.last() {
                     if matches!(last_instr, IrInstr::Jump { .. }) {
@@ -74,7 +80,7 @@ pub fn run(instrs: Vec<IrInstr>) -> Vec<IrInstr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inklang::ir::IrInstr;
+    use crate::inklang::ir::{IrInstr, IrLabel};
 
     // --- Self-move elimination ---
 
