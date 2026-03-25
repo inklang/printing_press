@@ -107,7 +107,11 @@ impl AstLowerer {
     }
 
     /// Add a constant to the constants table and return its index.
+    /// Returns the existing index if an equal value is already present.
     fn add_constant(&mut self, value: Value) -> usize {
+        if let Some(idx) = self.constants.iter().position(|c| c == &value) {
+            return idx;
+        }
         self.constants.push(value);
         self.constants.len() - 1
     }
@@ -1715,5 +1719,102 @@ mod tests {
         let _dst = lowerer.lower_expr(&expr, 0);
         let has_new_array = lowerer.instrs.iter().any(|i| matches!(i, IrInstr::NewArray { .. }));
         assert!(has_new_array);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_first_constant() {
+        let mut lowerer = AstLowerer::new();
+        let idx = lowerer.add_constant(Value::Int(1));
+        assert_eq!(idx, 0);
+        assert_eq!(lowerer.constants, vec![Value::Int(1)]);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_duplicate_returns_existing() {
+        let mut lowerer = AstLowerer::new();
+        let idx0 = lowerer.add_constant(Value::Int(1));
+        let idx1 = lowerer.add_constant(Value::Int(1));
+        assert_eq!(idx0, 0);
+        assert_eq!(idx1, 0);
+        assert_eq!(lowerer.constants.len(), 1);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_different_values() {
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::Int(1));
+        let b = lowerer.add_constant(Value::Int(2));
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+        assert_eq!(lowerer.constants.len(), 2);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_string() {
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::String("foo".to_string()));
+        let b = lowerer.add_constant(Value::String("foo".to_string()));
+        assert_eq!(a, b);
+        assert_eq!(lowerer.constants.len(), 1);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_boolean() {
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::Boolean(true));
+        let b = lowerer.add_constant(Value::Boolean(true));
+        assert_eq!(a, b);
+        assert_eq!(lowerer.constants.len(), 1);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_null() {
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::Null);
+        let b = lowerer.add_constant(Value::Null);
+        assert_eq!(a, b);
+        assert_eq!(lowerer.constants.len(), 1);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_mixed_unique() {
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::Int(0));
+        let b = lowerer.add_constant(Value::Int(1));
+        let c = lowerer.add_constant(Value::Int(0)); // duplicate
+        let d = lowerer.add_constant(Value::Int(2));
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+        assert_eq!(c, 0); // returns existing
+        assert_eq!(d, 2);
+        assert_eq!(lowerer.constants.len(), 3);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_float() {
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::Float(1.0));
+        let b = lowerer.add_constant(Value::Float(1.0));
+        assert_eq!(a, b);
+        assert_eq!(lowerer.constants.len(), 1);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_distinct_floats() {
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::Float(1.0));
+        let b = lowerer.add_constant(Value::Float(2.0));
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+    }
+
+    #[test]
+    fn test_add_constant_dedup_nan_not_deduplicated() {
+        // f32::NAN != f32::NAN under IEEE 754, so two NaN entries are expected
+        let mut lowerer = AstLowerer::new();
+        let a = lowerer.add_constant(Value::Float(f32::NAN));
+        let b = lowerer.add_constant(Value::Float(f32::NAN));
+        assert_ne!(a, b);
+        assert_eq!(lowerer.constants.len(), 2);
     }
 }
