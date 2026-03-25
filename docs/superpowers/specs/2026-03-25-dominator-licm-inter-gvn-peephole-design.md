@@ -57,7 +57,7 @@ impl DominatorTree {
 }
 ```
 
-`CfgBlock` must be made `pub(super)` (visible within the `ssa` module) so that `dominance.rs` can accept it. It does not need to be public outside `ssa`.
+`CfgBlock` must be made `pub(super)` so that `dominance.rs` can accept it. In Rust, `pub(super)` on an item in `src/inklang/ssa/builder.rs` makes it visible to `src/inklang/ssa/mod.rs` and all sibling submodules declared there — including `dominance.rs`. No re-export in `mod.rs` is needed. It does not need to be public outside `ssa`.
 
 The `SsaBuilder` refactor replaces its private `DominanceFrontier` with `DominatorTree::from_cfg`. The `DominanceFrontier` struct and its `impl` block are **deleted entirely**. Optimization passes call `DominatorTree::from_ssa`.
 
@@ -81,7 +81,9 @@ pub struct DominatorTree {
 }
 ```
 
-All fields derived from the graph (RPO, back edges) are **precomputed during construction** so query methods are O(1) or O(n) without re-traversal. The `func` argument is not re-passed to query methods.
+All fields derived from the graph (RPO, back edges) are **precomputed during construction** so query methods are cheap without re-traversal. The `func` argument is not re-passed to query methods.
+
+`dominates(a, b)` is implemented by climbing the idom chain from `b` toward the root, returning true if `a` is reached or `a == b`. This is O(tree depth), which is acceptable for typical CFG depths. An O(1) implementation using precomputed DFS entry/exit timestamps is not required.
 
 ### Public API
 
@@ -131,7 +133,17 @@ Existing builder tests validate correctness. One new targeted test (see Testing 
 
 **`rename_variables` / `rename_block` migration:**
 
-`rename_variables` gains a `dom_tree: &DominatorTree` parameter (the tree is now constructed once in `build` and passed down). Its internal `let dom_tree = self.dom_frontier.dominator_tree()` line is removed. The call to `self.rename_block` is otherwise unchanged except the `dom_tree` type changes.
+`rename_variables` gains a `dom_tree: &DominatorTree` parameter (still private, still only called from `build`). Its internal `let dom_tree = self.dom_frontier.dominator_tree()` line is removed. In `build`, the call site changes from:
+
+```rust
+// Before:
+builder.rename_variables();
+
+// After:
+builder.rename_variables(&dom_tree);  // dom_tree built once earlier in build()
+```
+
+The call to `self.rename_block` inside `rename_variables` is otherwise unchanged except the `dom_tree` type changes.
 
 `rename_block`'s third parameter changes from `dom_tree: &HashMap<usize, Vec<usize>>` to `dom_tree: &DominatorTree`. The recursive child-iteration at the bottom of `rename_block` changes from:
 
@@ -161,7 +173,7 @@ for &child_id in dom_tree.children(block_id) {
 
 ### Extended behavior
 
-**Dominator-based value numbering (DVNT):** walk blocks in dominator tree order (DFS, parent before children). Each block inherits its parent's **validated** value table (see soundness note below). After processing its own instructions, it passes the updated table to each child. After all children finish, the block's own additions are discarded — siblings do not share entries.
+**Dominator-based value numbering (DVNT):** process blocks in **RPO order** (from `dom_tree.rpo()`). RPO guarantees every dominator appears before its dominated children. Each block inherits its immediate dominator's completed value table. Siblings never share tables — each child receives an independent clone of its idom's table.
 
 ### Soundness: value table inheritance
 
@@ -171,7 +183,15 @@ The existing `process_block` removes an entry from `value_table` when a side-eff
 
 The fix: at every point in `process_block` where a hash H is inserted into `invalidated_by_side_effect`, immediately also call `value_table.remove(&H)`. After this change the two maps are disjoint at all times, making the table safe to clone and pass to children.
 
-**Additional invalidation for load/store aliasing:** `SetIndex` and `SetField` instructions can alias with `GetIndex` and `GetField` instructions on the same collection. When a `SetIndex` or `SetField` instruction is encountered in `process_block`, **all `GetIndex` and `GetField` entries must be removed from `value_table`** (not just the hash of the `SetIndex`/`SetField` itself, which is always `None` from `compute_hash`). This prevents a parent block's `GetIndex` result from being incorrectly reused in a child block that follows a `SetIndex` that modified the same collection.
+**Note:** In practice, `compute_hash` currently returns `None` for all side-effecting instructions (including `Call`, `LoadGlobal`, `SetIndex`, etc.), so `invalidated_by_side_effect` is always empty under the current implementation. The explicit removal is therefore a **defensive invariant** that costs nothing today but prevents unsound cross-block propagation if `compute_hash` is ever extended to hash side-effecting instructions.
+
+**Additional invalidation for load/store aliasing:** `SetIndex` and `SetField` instructions can alias with `GetIndex` and `GetField` instructions on the same collection. When a `SetIndex` or `SetField` instruction is encountered in `process_block`, **before** calling `try_gvn` for that instruction, remove all `GetIndex` and `GetField` entries from `value_table`:
+
+```rust
+value_table.retain(|k, _| !matches!(k, ExprHash::GetIndex(..) | ExprHash::GetField(..)));
+```
+
+This prevents a parent block's `GetIndex` result from being incorrectly reused in a child block that follows a `SetIndex` that modified the same collection. `HasCheck` entries are not purged (they key on field presence, not field values, and `SetField` does not change which fields exist).
 
 `process_block` signature change:
 ```rust
@@ -210,7 +230,7 @@ v2 = x + y   // → Move v2 ← v0  (inter-block GVN catches this; current pass 
 
 ### `run` method change
 
-Builds `DominatorTree::from_ssa(&ssa_func)`, then does a recursive DFS from the entry block passing each block's completed table to its children. Otherwise identical to current behavior.
+Builds `DominatorTree::from_ssa(&ssa_func)`, then iterates blocks in RPO order using the ownership strategy described above. The `changed` flag accumulates across all blocks. Otherwise identical to current behavior.
 
 ---
 
@@ -246,7 +266,7 @@ An `SsaInstr` in a loop body block is **loop-invariant** if all of:
 For each loop with loop-invariant instructions to hoist:
 
 - Create a new `SsaBlock` with ID = `func.blocks.iter().map(|b| b.id).max().unwrap_or(0) + 1`. **When processing multiple loops, recompute this max after each pre-header insertion** — do not cache the maximum upfront, as the prior pre-header's ID must be included.
-- **Insert** the pre-header into `func.blocks` at the index immediately before the loop header's current position (not appended to the end) so that dominator-before-dominated ordering is preserved for subsequent passes.
+- **Insert** the pre-header into `func.blocks` at the index immediately before the loop header's current position (not appended to the end). This is a stylistic convention — RPO is derived from graph traversal, not `Vec` order, so physical position has no correctness impact. Inserting before the header keeps the `Vec` layout readable in dumps.
 - Redirect all non-back-edge predecessors of `H` to the pre-header.
 - Set pre-header's sole successor = `H`; pre-header's predecessors = former non-back-edge predecessors of `H`.
 - Update `H`'s predecessor list: replace former non-back-edge predecessors with the pre-header ID.
@@ -254,12 +274,12 @@ For each loop with loop-invariant instructions to hoist:
 
 **Step 4 — Hoist instructions.**
 
-Append loop-invariant instructions to the pre-header in **topological dependency order**: if instruction A's `defined_value` is used by instruction B and both are being hoisted, A appears before B. The set of hoisted instructions always forms a DAG — by definition every hoisted instruction's operands are defined outside the loop body, so no two hoisted instructions can form a dependency cycle. A simple iterative approach works: repeatedly append any hoisted instruction whose operands are all already placed, until the set is exhausted.
+Append loop-invariant instructions to the pre-header in **topological dependency order**: if instruction A's `defined_value` is used by instruction B and both are being hoisted, A appears before B. The set of hoisted instructions always forms a DAG — by definition every hoisted instruction's operands are defined outside the loop body, so no two hoisted instructions can form a dependency cycle. A simple iterative approach works: repeatedly append any hoisted instruction whose `used_values()` are all either (a) defined in a block outside the loop body, or (b) the `defined_value` of an instruction already appended to the pre-header block in the current hoisting pass — until the set of remaining hoisted instructions is exhausted.
 
 **Pre-header terminator protocol:** The pre-header's final instruction must be `SsaInstr::Jump { target: label }` where `label` is an `IrLabel` that appears as `SsaInstr::Label { label }` at the start of `H.instrs`. The exact steps:
 
 1. Scan `H.instrs` for the first `SsaInstr::Label { label }`. If found, use that `label` as the jump target.
-2. If `H.instrs` has no leading `Label` instruction, allocate a new one: scan all instructions in all blocks for the maximum `IrLabel` integer value, add 1 to get `new_label`, prepend `SsaInstr::Label { label: new_label }` to `H.instrs`, and use `new_label` as the jump target.
+2. If `H.instrs` has no leading `Label` instruction, allocate a new one: scan all instructions in all blocks for the maximum `IrLabel` integer value, add 1 to get `new_label`, prepend `SsaInstr::Label { label: new_label }` to `H.instrs`, set `H.label = Some(new_label)` to keep the block's metadata consistent, and use `new_label` as the jump target.
 
 Append `SsaInstr::Jump { target }` as the last instruction of the pre-header block.
 
@@ -284,8 +304,11 @@ impl SsaOptPass for SsaLicmPass {
 
 LICM is called **once directly** in `run_optimization_passes`, NOT through `run_pass` (which loops to fixed point). A single application hoists all invariant instructions; re-running would attempt to re-hoist already-hoisted instructions and must not occur.
 
+`SsaOptResult` (already defined in `passes/mod.rs`) has two fields: `func: SsaFunction` and `changed: bool`. The existing `run_optimization_passes` already declares `let mut optimized = false;` and accumulates via `optimized = result.changed || optimized`. The LICM addition follows the same pattern:
+
 ```rust
 fn run_optimization_passes(mut ssa_func: SsaFunction) -> SsaOptResult {
+    let mut optimized = false;
     // ... CP, GVN, AlgebraicSimpl, CopyProp, DCE via run_pass as before ...
 
     // LICM: one-shot, not via run_pass
@@ -311,11 +334,12 @@ Operates on the final physical-register linear `Vec<IrInstr>` — after `SpillIn
 
 ### Patterns
 
+The implementation performs a **single linear scan**, collecting kept instructions into a new `Vec<IrInstr>` (not modifying in-place with index deletion, which would cause O(n²) shifts). Each instruction is either pushed to the output or skipped.
+
 **Pattern 1 — Jump-to-next elimination.**
 
-Scan for `IrInstr::Jump { target: L }` where the immediately following instruction is `IrInstr::Label { label: L }` (same label value). The jump transfers to the next instruction — it is a no-op. Remove the `Jump`.
+Scan for `IrInstr::Jump { target: L }` where the immediately following instruction is `IrInstr::Label { label: L }` (same label value). The jump transfers to the next instruction — it is a no-op. Skip the `Jump` (do not push to output).
 
-Implementation: single linear scan with explicit bounds check:
 ```
 if i + 1 < instrs.len()
    && instrs[i] is Jump { target }
@@ -326,7 +350,7 @@ if i + 1 < instrs.len()
 
 **Pattern 2 — Self-move elimination.**
 
-Scan for `IrInstr::Move { dst, src }` where `dst == src`. These appear when register allocation assigns the same physical register to both the destination and source of a phi-deconstruction move. Remove the `Move`.
+Scan for `IrInstr::Move { dst, src }` where `dst == src`. These appear when register allocation assigns the same physical register to both the destination and source of a phi-deconstruction move. Skip the `Move`.
 
 ### Pipeline integration
 
