@@ -12,6 +12,7 @@ pub mod liveness;
 pub mod register_alloc;
 pub mod spill_insert;
 pub mod codegen;
+pub mod peephole;
 pub mod chunk;
 pub mod serialize;
 pub mod grammar;
@@ -43,7 +44,7 @@ pub enum CompileError {
 /// Grammar is auto-discovered from dist/ and packages/*/dist/.
 ///
 /// # Pipeline
-/// 1. Tokenize → 2. Parse (auto-grammar) → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 7. Codegen → 8. Serialize
+/// 1. Tokenize → 2. Parse (auto-grammar) → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 6b. Peephole → 7. Codegen → 8. Serialize
 pub fn compile(source: &str, name: &str) -> Result<SerialScript, CompileError> {
     let grammar = auto_discover_grammar();
     compile_with_grammar(source, name, grammar.as_ref())
@@ -85,7 +86,7 @@ fn auto_discover_grammar() -> Option<MergedGrammar> {
 /// Compile Inklang source code with a grammar to a SerialScript (JSON).
 ///
 /// # Pipeline
-/// 1. Tokenize → 2. Parse (with grammar) → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 7. Codegen → 8. Serialize
+/// 1. Tokenize → 2. Parse (with grammar) → 3. Constant Fold → 4. Lower to IR → 5. SSA Round-trip → 6. Register Alloc → 6b. Peephole → 7. Codegen → 8. Serialize
 pub fn compile_with_grammar(source: &str, name: &str, grammar: Option<&MergedGrammar>) -> Result<SerialScript, CompileError> {
     // 1. Tokenize
     let tokens = lexer::tokenize(source);
@@ -113,6 +114,9 @@ pub fn compile_with_grammar(source: &str, name: &str, grammar: Option<&MergedGra
     let mut allocator = RegisterAllocator::new();
     let alloc = allocator.allocate(&ranges, lowered.arity);
     let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
+
+    // 6b. Peephole cleanup
+    let resolved = peephole::run(resolved);
 
     // 7. Codegen
     let codegen_result = codegen::LoweredResult {
