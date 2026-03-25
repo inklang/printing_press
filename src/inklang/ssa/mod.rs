@@ -164,4 +164,41 @@ mod tests {
         assert_eq!(phi.result.version, 0);
         assert_eq!(phi.operands.len(), 2);
     }
+
+    #[test]
+    fn test_ssa_deconstruct_single_loadimm() {
+        // Single instruction: r0 = LoadImm{index: 0}
+        let constants = vec![Value::Int(5)];
+        let instrs = vec![
+            IrInstr::LoadImm { dst: 0, index: 0 },
+        ];
+
+        let ssa_func = SsaBuilder::build(instrs.clone(), constants.clone(), 0);
+        eprintln!("SSA blocks: {:?}", ssa_func.blocks.len());
+        for (i, block) in ssa_func.blocks.iter().enumerate() {
+            eprintln!("  block {}: label={:?}, phi_count={}, instr_count={}",
+                i, block.label, block.phi_functions.len(), block.instrs.len());
+            for instr in &block.instrs {
+                eprintln!("    instr: {:?}", instr);
+            }
+        }
+
+        let result = deconstruct(ssa_func);
+        eprintln!("Deconstructed: {:?}", result);
+        assert!(!result.is_empty(), "Deconstruct of single LoadImm should not be empty");
+    }
+
+    #[test]
+    fn test_ssa_round_trip_single_loadimm() {
+        // Reproduce exactly what the failing test does
+        let constants = vec![Value::Int(5)];
+        let instrs = vec![
+            IrInstr::LoadImm { dst: 0, index: 0 },
+        ];
+
+        let result = optimized_ssa_round_trip(instrs, constants, 0);
+        eprintln!("Round-trip result: {} instrs, {:?}", result.instrs.len(), result.instrs);
+        assert!(!result.instrs.is_empty(), "Round-trip should not produce empty result");
+    }
+
 }

@@ -91,6 +91,20 @@ impl SsaDeadCodeEliminationPass {
                     }
                 }
 
+                // Blocks with no successors represent implicit returns — the last defined
+                // value in such a block is the function's return value and must be preserved.
+                // Without this, DCE incorrectly removes the only instruction from programs
+                // consisting of a single pure expression (e.g. `let x = 5` → one LoadImm).
+                if block.successors.is_empty() {
+                    if let Some(last_instr) = block.instrs.last() {
+                        if let Some(defined) = last_instr.defined_value() {
+                            if live.insert(defined) {
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+
                 // Process phi functions
                 for phi in &block.phi_functions {
                     if live.contains(&phi.result) {
