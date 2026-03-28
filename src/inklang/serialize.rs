@@ -7,8 +7,56 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::chunk::{Chunk, ClassInfo, FunctionDefaults};
+use super::chunk::{Chunk, ClassInfo, CstNodeEntry, FunctionDefaults};
 use super::value::Value;
+
+// ---------------------------------------------------------------------------
+// SerialCstNode - matches Kotlin CstNode sealed class with discriminator "t"
+// ---------------------------------------------------------------------------
+
+/// Serializable CST node that matches the Kotlin CstNode sealed class.
+/// The discriminator field is "t" with short names matching the Kotlin @SerialName.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "t")]
+pub enum SerialCstNode {
+    #[serde(rename = "decl")]
+    Declaration {
+        keyword: String,
+        name: String,
+        body: Vec<SerialCstNode>,
+    },
+    #[serde(rename = "rule")]
+    RuleMatch {
+        #[serde(rename = "ruleName")]
+        rule_name: String,
+        children: Vec<SerialCstNode>,
+    },
+    #[serde(rename = "kw")]
+    Keyword { value: String },
+    #[serde(rename = "fnblk")]
+    FunctionBlock {
+        #[serde(rename = "funcIdx")]
+        func_idx: usize,
+    },
+}
+
+impl SerialCstNode {
+    pub fn from_entry(entry: &CstNodeEntry) -> Self {
+        match entry {
+            CstNodeEntry::Declaration { keyword, name, body } => SerialCstNode::Declaration {
+                keyword: keyword.clone(),
+                name: name.clone(),
+                body: body.iter().map(SerialCstNode::from_entry).collect(),
+            },
+            CstNodeEntry::RuleMatch { rule_name, children } => SerialCstNode::RuleMatch {
+                rule_name: rule_name.clone(),
+                children: children.iter().map(SerialCstNode::from_entry).collect(),
+            },
+            CstNodeEntry::Keyword { value } => SerialCstNode::Keyword { value: value.clone() },
+            CstNodeEntry::FunctionBlock { func_idx } => SerialCstNode::FunctionBlock { func_idx: *func_idx },
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // SerialValue - matches Kotlin SerialValue exactly
@@ -123,7 +171,7 @@ pub struct SerialChunk {
     #[serde(rename = "spillSlotCount")]
     pub spill_slot_count: usize,
     #[serde(rename = "cstTable")]
-    pub cst_table: Vec<()>,
+    pub cst_table: Vec<SerialCstNode>,
 }
 
 impl SerialChunk {
@@ -139,7 +187,7 @@ impl SerialChunk {
                 .map(|(k, (count, regs))| (k.to_string(), SerialUpvalue { count: *count, regs: regs.clone() }))
                 .collect(),
             spill_slot_count: chunk.spill_slot_count,
-            cst_table: vec![], // CST not serialized in Rust
+            cst_table: chunk.cst_table.iter().map(SerialCstNode::from_entry).collect(),
         }
     }
 

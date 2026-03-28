@@ -947,10 +947,11 @@ fn convert_instr(instr: &IrInstr) -> Option<super::block::SsaInstr> {
         }
         IR::Break => Some(SsaInstr::Break),
         IR::Next => Some(SsaInstr::Next),
-        IR::CallHandler { handler_name, block_bodies } => {
+        IR::CallHandler { keyword, decl_name, rule_bodies } => {
             Some(SsaInstr::CallHandler {
-                handler_name: handler_name.clone(),
-                block_bodies: block_bodies.clone(),
+                keyword: keyword.clone(),
+                decl_name: decl_name.clone(),
+                rule_bodies: rule_bodies.clone(),
             })
         }
         // These are not converted to SSA

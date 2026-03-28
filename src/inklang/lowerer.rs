@@ -8,7 +8,7 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 use super::ast::{Expr, Param, Stmt};
-use super::ir::{DefaultValueInfo, IrInstr, IrLabel, MethodInfo};
+use super::ir::{DefaultValueInfo, IrInstr, IrLabel, MethodInfo, RuleBodyIr};
 use super::token::TokenType;
 use super::value::Value;
 
@@ -194,6 +194,25 @@ impl AstLowerer {
             Stmt::Table { name, fields } => self.lower_table(name, fields),
             Stmt::AnnotationDef { .. } => {
                 // Annotation declarations are compile-time only - no IR emitted
+            }
+            Stmt::GrammarDecl { keyword, name, rules } => {
+                // Lower each rule's body independently, then emit CallHandler.
+                let mut rule_bodies: Vec<RuleBodyIr> = Vec::new();
+                for rule in rules {
+                    let mut body_lowerer = AstLowerer::new();
+                    let result = body_lowerer.lower(&rule.body);
+                    rule_bodies.push(RuleBodyIr {
+                        rule_name: rule.rule_name.clone(),
+                        leading_keyword: rule.leading_keyword.clone(),
+                        instrs: result.instrs,
+                        constants: result.constants,
+                    });
+                }
+                self.instrs.push(IrInstr::CallHandler {
+                    keyword: keyword.clone(),
+                    decl_name: name.clone(),
+                    rule_bodies,
+                });
             }
         }
     }

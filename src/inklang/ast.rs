@@ -272,6 +272,24 @@ pub enum Stmt {
         name: Token,
         args: Vec<Param>,
     },
+    /// Grammar declaration: `keyword Name { rule_bodies... }`
+    /// Emitted when a grammar keyword is parsed as a declaration.
+    GrammarDecl {
+        keyword: String,
+        name: String,
+        rules: Vec<GrammarRuleBody>,
+    },
+}
+
+/// One matched scope rule inside a grammar declaration body.
+#[derive(Debug, Clone)]
+pub struct GrammarRuleBody {
+    /// Fully-qualified rule name, e.g. "ink.paper/on_join_clause".
+    pub rule_name: String,
+    /// Leading keyword token value in the rule definition, e.g. "on_join".
+    pub leading_keyword: Option<String>,
+    /// Parsed body statements (the null-scope block body).
+    pub body: Vec<Stmt>,
 }
 
 #[cfg(test)]

@@ -213,8 +213,9 @@ pub enum SsaInstr {
 
     /// Call a plugin handler.
     CallHandler {
-        handler_name: String,
-        block_bodies: Vec<(Vec<crate::inklang::ir::IrInstr>, Vec<Value>)>,
+        keyword: String,
+        decl_name: String,
+        rule_bodies: Vec<crate::inklang::ir::RuleBodyIr>,
     },
 }
 
@@ -356,8 +357,8 @@ impl fmt::Display for SsaInstr {
             }
             SsaInstr::Break => write!(f, "Break"),
             SsaInstr::Next => write!(f, "Next"),
-            SsaInstr::CallHandler { handler_name, .. } => {
-                write!(f, "CallHandler {}", handler_name)
+            SsaInstr::CallHandler { keyword, decl_name, .. } => {
+                write!(f, "CallHandler {} {}", keyword, decl_name)
             }
         }
     }

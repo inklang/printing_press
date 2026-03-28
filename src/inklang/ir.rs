@@ -230,12 +230,28 @@ pub enum IrInstr {
         args: Vec<usize>,
     },
 
-    /// Call a plugin handler (e.g., on block, command).
+    /// Call a plugin handler (grammar declaration dispatch).
     CallHandler {
-        handler_name: String,
-        /// IR for each null-scope block body, in declaration order.
-        block_bodies: Vec<(Vec<IrInstr>, Vec<Value>)>,
+        /// Declaration keyword, e.g. "player".
+        keyword: String,
+        /// Declaration instance name, e.g. "Greeter".
+        decl_name: String,
+        /// One entry per matched scope rule.
+        rule_bodies: Vec<RuleBodyIr>,
     },
+}
+
+/// Compiled body for one scope rule inside a grammar declaration.
+#[derive(Debug, Clone)]
+pub struct RuleBodyIr {
+    /// Fully-qualified rule name, e.g. "ink.paper/on_join_clause".
+    pub rule_name: String,
+    /// Leading keyword from the rule definition, e.g. "on_join".
+    pub leading_keyword: Option<String>,
+    /// IR instructions for the block body.
+    pub instrs: Vec<IrInstr>,
+    /// Constants used by the block body.
+    pub constants: Vec<Value>,
 }
 
 #[cfg(test)]

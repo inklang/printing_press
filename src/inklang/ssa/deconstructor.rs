@@ -410,10 +410,11 @@ impl SsaDeconstructor {
             }
             SsaInstr::Break => Some(IR::Break),
             SsaInstr::Next => Some(IR::Next),
-            SsaInstr::CallHandler { handler_name, block_bodies } => {
+            SsaInstr::CallHandler { keyword, decl_name, rule_bodies } => {
                 Some(IR::CallHandler {
-                    handler_name: handler_name.clone(),
-                    block_bodies: block_bodies.clone(),
+                    keyword: keyword.clone(),
+                    decl_name: decl_name.clone(),
+                    rule_bodies: rule_bodies.clone(),
                 })
             }
         }

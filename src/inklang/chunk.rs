@@ -7,6 +7,27 @@ use std::collections::HashMap;
 
 use super::value::Value;
 
+/// A node in the concrete syntax tree, stored in the chunk's cst_table.
+/// The VM reads these at runtime to dispatch grammar declarations to PackageBridge.
+#[derive(Debug, Clone)]
+pub enum CstNodeEntry {
+    Declaration {
+        keyword: String,
+        name: String,
+        body: Vec<CstNodeEntry>,
+    },
+    RuleMatch {
+        rule_name: String,
+        children: Vec<CstNodeEntry>,
+    },
+    Keyword {
+        value: String,
+    },
+    FunctionBlock {
+        func_idx: usize,
+    },
+}
+
 /// Bytecode operations - MUST match Kotlin OpCode values exactly.
 ///
 /// # Bit Layout (32-bit word)
@@ -85,7 +106,7 @@ pub struct Chunk {
     pub function_defaults: Vec<FunctionDefaults>,
     pub function_upvalues: HashMap<usize, (usize, Vec<usize>)>,
     pub spill_slot_count: usize,
-    pub cst_table: Vec<()>,
+    pub cst_table: Vec<CstNodeEntry>,
 }
 
 impl Chunk {

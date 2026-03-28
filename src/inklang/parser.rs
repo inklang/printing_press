@@ -6,9 +6,10 @@
 use std::collections::HashMap;
 
 use super::ast::{
-    ConfigField, EnumVariant, EventParam, Expr, Param, Stmt,
+    ConfigField, EnumVariant, EventParam, Expr, GrammarRuleBody, Param, Stmt,
     TableField,
 };
+use super::grammar::Rule;
 use super::error::{Error, Result};
 use super::grammar::MergedGrammar;
 use super::token::{Token, TokenType};
@@ -141,6 +142,28 @@ impl<'a> Parser<'a> {
             TokenType::KwOn => self.parse_on_handler(),
             TokenType::KwEnable => self.parse_enable(),
             TokenType::KwDisable => self.parse_disable(),
+            TokenType::Identifier => {
+                // Check if this identifier matches a grammar declaration keyword
+                let lexeme = self.peek().lexeme.clone();
+                let decl_def = self.grammar.and_then(|g| {
+                    g.declarations.iter().find(|d| d.keyword == lexeme).cloned()
+                });
+                if let Some(decl) = decl_def {
+                    return self.parse_grammar_decl(&decl);
+                }
+                // Not a grammar keyword — fall through to expression parsing
+                let expr = self.parse_expression(Precedence::None)?;
+                if self.check(&TokenType::Assign) || self.check(&TokenType::AddEquals)
+                    || self.check(&TokenType::SubEquals) || self.check(&TokenType::MulEquals)
+                    || self.check(&TokenType::DivEquals) || self.check(&TokenType::ModEquals)
+                {
+                    // handled below
+                }
+                if self.check(&TokenType::Semicolon) {
+                    self.advance();
+                }
+                return Ok(Stmt::Expr(expr));
+            }
             TokenType::LBrace => {
                 // Could be block or map/set literal
                 // Use lookahead to distinguish:
@@ -521,6 +544,91 @@ impl<'a> Parser<'a> {
 
         self.consume(&TokenType::RBrace, "Expected '}' after annotation body")?;
         Ok(Stmt::AnnotationDef { name, args })
+    }
+
+    /// Parse a grammar declaration: `keyword Name { scope_rules... }`
+    ///
+    /// Each scope rule that starts with a keyword is matched by checking
+    /// the leading token. Block bodies are parsed as lists of statements.
+    fn parse_grammar_decl(&mut self, decl: &super::grammar::DeclarationDef) -> Result<Stmt> {
+        let keyword = self.advance().lexeme.clone(); // consume the grammar keyword
+        let name = self.consume(&TokenType::Identifier, "Expected declaration name after grammar keyword")?.lexeme.clone();
+        self.consume(&TokenType::LBrace, "Expected '{' after declaration name")?;
+
+        let mut rules: Vec<GrammarRuleBody> = Vec::new();
+
+        while !self.check(&TokenType::RBrace) && !self.is_at_end() {
+            let mut matched = false;
+            for rule_name in &decl.scope_rules {
+                if let Some(grammar) = self.grammar {
+                    if let Some(rule_entry) = grammar.rules.get(rule_name.as_str()) {
+                        if let Some((leading_kw, has_block)) = Self::rule_leading_keyword_and_block(&rule_entry.rule) {
+                            // Check if current token matches the leading keyword
+                            if self.peek().typ == TokenType::Identifier && self.peek().lexeme == leading_kw {
+                                self.advance(); // consume the leading keyword
+                                if has_block {
+                                    // Parse the block body: { stmts... }
+                                    self.consume(&TokenType::LBrace, "Expected '{' after keyword in grammar rule")?;
+                                    let mut body = Vec::new();
+                                    while !self.check(&TokenType::RBrace) && !self.is_at_end() {
+                                        body.push(self.parse_statement()?);
+                                    }
+                                    self.consume(&TokenType::RBrace, "Expected '}' to close grammar rule block")?;
+                                    rules.push(GrammarRuleBody {
+                                        rule_name: rule_name.clone(),
+                                        leading_keyword: Some(leading_kw),
+                                        body,
+                                    });
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                        } else if Self::rule_is_bare_block(&rule_entry.rule) {
+                            // Rule is just a block(), no leading keyword
+                            if self.check(&TokenType::LBrace) {
+                                self.consume(&TokenType::LBrace, "Expected '{' for grammar rule block")?;
+                                let mut body = Vec::new();
+                                while !self.check(&TokenType::RBrace) && !self.is_at_end() {
+                                    body.push(self.parse_statement()?);
+                                }
+                                self.consume(&TokenType::RBrace, "Expected '}' to close grammar rule block")?;
+                                rules.push(GrammarRuleBody {
+                                    rule_name: rule_name.clone(),
+                                    leading_keyword: None,
+                                    body,
+                                });
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if !matched {
+                // Skip unrecognized tokens to avoid infinite loop
+                self.advance();
+            }
+        }
+
+        self.consume(&TokenType::RBrace, "Expected '}' to close grammar declaration")?;
+        Ok(Stmt::GrammarDecl { keyword, name, rules })
+    }
+
+    /// If the rule is `seq(keyword(k), block())`, return `Some((k, true))`.
+    /// If the rule is `seq(keyword(k), ...)` without a block, return `Some((k, false))`.
+    fn rule_leading_keyword_and_block(rule: &Rule) -> Option<(String, bool)> {
+        if let Rule::Seq { items } = rule {
+            if let Some(Rule::Keyword { value }) = items.first() {
+                let has_block = items.iter().any(|it| matches!(it, Rule::Block { .. }));
+                return Some((value.clone(), has_block));
+            }
+        }
+        None
+    }
+
+    /// Returns true if the rule is just `block()` with no leading keyword.
+    fn rule_is_bare_block(rule: &Rule) -> bool {
+        matches!(rule, Rule::Block { .. })
     }
 
     /// Parse an event declaration.

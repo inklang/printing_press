@@ -284,20 +284,37 @@ fn emit_instr(chunk: &mut Chunk, instr: &IrInstr, label_offsets: &HashMap<usize,
             }
             chunk.write(OpCode::AsyncCall, *dst, *func, 0, args.len());
         }
-        IrInstr::CallHandler { handler_name: _, block_bodies } => {
-            // Compile each block body into chunk.functions
-            let func_indices: Vec<usize> = block_bodies.iter().map(|(body_instrs, body_constants)| {
-                let compiled = compile_function_body(body_instrs, body_constants, 0);
-                let idx = chunk.functions.len();
-                chunk.functions.push(Box::new(compiled.chunk));
-                idx
-            }).collect();
+        IrInstr::CallHandler { keyword, decl_name, rule_bodies } => {
+            use super::chunk::CstNodeEntry;
 
-            // For now, just write CallHandler with the first func index
-            // CST resolution would need more infrastructure
-            if let Some(&first_idx) = func_indices.first() {
-                chunk.write(OpCode::CallHandler, 0, 0, 0, first_idx);
+            // Compile each rule body into chunk.functions and build CST children
+            let mut decl_body_entries: Vec<CstNodeEntry> = Vec::new();
+            for rule_body in rule_bodies {
+                let compiled = compile_function_body(&rule_body.instrs, &rule_body.constants, 0);
+                let func_idx = chunk.functions.len();
+                chunk.functions.push(Box::new(compiled.chunk));
+
+                // Build children for this RuleMatch entry
+                let mut children: Vec<CstNodeEntry> = Vec::new();
+                if let Some(ref kw) = rule_body.leading_keyword {
+                    children.push(CstNodeEntry::Keyword { value: kw.clone() });
+                }
+                children.push(CstNodeEntry::FunctionBlock { func_idx });
+
+                decl_body_entries.push(CstNodeEntry::RuleMatch {
+                    rule_name: rule_body.rule_name.clone(),
+                    children,
+                });
             }
+
+            // Add the Declaration node to cst_table and emit CALL_HANDLER
+            let cst_idx = chunk.cst_table.len();
+            chunk.cst_table.push(CstNodeEntry::Declaration {
+                keyword: keyword.clone(),
+                name: decl_name.clone(),
+                body: decl_body_entries,
+            });
+            chunk.write(OpCode::CallHandler, 0, 0, 0, cst_idx);
         }
     }
 }

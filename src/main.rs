@@ -30,6 +30,10 @@ struct CompileArgs {
     #[arg(long, value_name = "DIR")]
     out: Option<String>,
 
+    /// Grammar IR file (.json) to use for compilation
+    #[arg(long, value_name = "PATH")]
+    grammar: Option<String>,
+
     /// Pretty-print JSON output
     #[arg(short, long)]
     debug: bool,
@@ -39,8 +43,18 @@ fn main() {
     let args = Args::parse();
     match args.command {
         Command::Compile(c) => {
-            // Auto-discover grammars
-            let grammar = printing_press::inklang::grammar::discover_grammars();
+            // Use explicit --grammar if provided, otherwise auto-discover
+            let grammar = if let Some(ref grammar_path) = c.grammar {
+                match printing_press::inklang::grammar::load_grammar(grammar_path) {
+                    Ok(pkg) => Some(printing_press::inklang::grammar::merge_grammars(vec![pkg])),
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                printing_press::inklang::grammar::discover_grammars()
+            };
 
             // Determine mode: if --sources provided, batch mode
             if let Some(sources_dir) = c.sources {
