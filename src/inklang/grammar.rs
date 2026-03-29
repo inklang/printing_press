@@ -85,12 +85,12 @@ pub struct MergedGrammar {
 /// Load a grammar package from a JSON file.
 pub fn load_grammar(path: &str) -> Result<GrammarPackage, CompileError> {
     let mut file = std::fs::File::open(path)
-        .map_err(|e| CompileError::Compilation(format!("Failed to open grammar file '{}': {}", path, e)))?;
+        .map_err(|e| CompileError::Other(format!("Failed to open grammar file '{}': {}", path, e)))?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)
-        .map_err(|e| CompileError::Compilation(format!("Failed to read grammar file '{}': {}", path, e)))?;
+        .map_err(|e| CompileError::Other(format!("Failed to read grammar file '{}': {}", path, e)))?;
     serde_json::from_str(&contents)
-        .map_err(|e| CompileError::Compilation(format!("Failed to parse grammar JSON from '{}': {}", path, e)))
+        .map_err(|e| CompileError::Other(format!("Failed to parse grammar JSON from '{}': {}", path, e)))
 }
 
 /// Auto-discover grammars by scanning:

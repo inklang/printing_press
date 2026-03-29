@@ -21,6 +21,7 @@ pub use serialize::{SerialScript, SerialChunk, SerialValue, SerialConfigField};
 
 use codegen::IrCompiler;
 use constant_fold::ConstantFolder;
+use error::Span;
 use grammar::MergedGrammar;
 use liveness::LivenessAnalyzer;
 use lowerer::AstLowerer;
@@ -32,12 +33,43 @@ use thiserror::Error;
 /// Compile error types.
 #[derive(Debug, Error)]
 pub enum CompileError {
-    #[error("Lexing error: {0}")]
-    Lexing(String),
-    #[error("Parsing error: {0}")]
-    Parsing(String),
-    #[error("Compilation error: {0}")]
-    Compilation(String),
+    #[error("{message}")]
+    Parsing {
+        message: String,
+        span: Span,
+        source_lines: Vec<String>,
+    },
+    #[error("{0}")]
+    Other(String),
+}
+
+impl CompileError {
+    /// Render the error with source context (line + caret).
+    pub fn display(&self) -> String {
+        match self {
+            CompileError::Parsing { message, span, source_lines } => {
+                let mut out = format!("error: {}", message);
+                let line_idx = span.line.saturating_sub(1);
+                if let Some(source_line) = source_lines.get(line_idx) {
+                    let line_num_width = format!("{}", span.line).len();
+                    out.push_str(&format!(
+                        "\n  {:>width$} | {}",
+                        span.line,
+                        source_line,
+                        width = line_num_width,
+                    ));
+                    out.push_str(&format!(
+                        "\n  {:>width$} | {}^",
+                        "",
+                        " ".repeat(span.column.saturating_sub(1)),
+                        width = line_num_width,
+                    ));
+                }
+                out
+            }
+            CompileError::Other(msg) => format!("error: {}", msg),
+        }
+    }
 }
 
 /// Compile Inklang source code to a SerialScript (JSON).
@@ -91,10 +123,20 @@ pub fn compile_with_grammar(source: &str, name: &str, grammar: Option<&MergedGra
     // 1. Tokenize
     let tokens = lexer::tokenize(source);
 
+    // Store source lines for error rendering
+    let source_lines: Vec<String> = source.lines().map(|l| l.to_string()).collect();
+
     // 2. Parse
     let ast = Parser::new(tokens, grammar)
         .parse()
-        .map_err(|e| CompileError::Parsing(e.to_string()))?;
+        .map_err(|e| {
+            let span = e.span().unwrap_or(Span { line: 1, column: 1 });
+            CompileError::Parsing {
+                message: e.to_string(),
+                span,
+                source_lines,
+            }
+        })?;
 
     // 3. Constant fold
     let folded = ConstantFolder::new().fold(&ast);

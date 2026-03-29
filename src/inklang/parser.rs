@@ -10,7 +10,7 @@ use super::ast::{
     TableField,
 };
 use super::grammar::Rule;
-use super::error::{Error, Result};
+use super::error::{Error, Result, Span};
 use super::grammar::MergedGrammar;
 use super::token::{Token, TokenType};
 use super::value::Value;
@@ -116,10 +116,13 @@ impl<'a> Parser<'a> {
                     }
                     Ok(Stmt::Expr(expr))
                 } else {
-                    Err(Error::Parse(format!(
-                        "Expected 'fn' or '(' after 'async', found {:?}",
-                        self.peek().typ
-                    )))
+                    Err(Error::Parse {
+                        message: format!(
+                            "Expected 'fn' or '(' after 'async', found {:?}",
+                            self.peek().typ
+                        ),
+                        span: Span { line: self.peek().line, column: self.peek().column },
+                    })
                 }
             }
             TokenType::KwFn => self.parse_func(annotations, false),
@@ -303,10 +306,13 @@ impl<'a> Parser<'a> {
                     Some(self.parse_expression(Precedence::None)?)
                 } else {
                     if has_seen_default_param {
-                        return Err(Error::Parse(format!(
-                            "Non-default parameter '{}' cannot follow default parameter",
-                            param_name.lexeme
-                        )));
+                        return Err(Error::Parse {
+                            message: format!(
+                                "Non-default parameter '{}' cannot follow default parameter",
+                                param_name.lexeme
+                            ),
+                            span: Span { line: param_name.line, column: param_name.column },
+                        });
                     }
                     None
                 };
@@ -353,7 +359,7 @@ impl<'a> Parser<'a> {
             | TokenType::KwDouble
             | TokenType::KwString
             | TokenType::Identifier => Ok(self.advance()),
-            _ => Err(Error::Parse(format!("Expected type, found {:?}", self.peek().typ))),
+            _ => Err(self.parse_error(format!("Expected type, found {:?}", self.peek().typ))),
         }
     }
 
@@ -826,9 +832,8 @@ impl<'a> Parser<'a> {
                 match &target {
                     Expr::Variable(_) | Expr::Get { .. } | Expr::Index { .. } => {}
                     _ => {
-                        return Err(Error::Parse(format!(
-                            "Invalid assignment target at line {}",
-                            token.line
+                        return Err(self.error_at(&token, format!(
+                            "Invalid assignment target"
                         )));
                     }
                 }
@@ -979,8 +984,8 @@ impl<'a> Parser<'a> {
                                 seen_named = true;
                             } else {
                                 if seen_named {
-                                    return Err(Error::Parse(
-                                        "Positional argument cannot follow named argument".into(),
+                                    return Err(self.parse_error(
+                                        "Positional argument cannot follow named argument"
                                     ));
                                 }
                                 args.push(self.parse_expression(Precedence::None)?);
@@ -1005,8 +1010,8 @@ impl<'a> Parser<'a> {
                         TokenType::KwHas => self.advance(), // has can be used as method name
                         TokenType::KwIs => self.advance(),  // is can be used as method name
                         _ => {
-                            return Err(Error::Parse(
-                                "Expected field name after '?.'".into(),
+                            return Err(self.parse_error(
+                                "Expected field name after '?.'"
                             ));
                         }
                     };
@@ -1022,8 +1027,8 @@ impl<'a> Parser<'a> {
                         TokenType::KwHas => self.advance(), // has can be used as method name
                         TokenType::KwIs => self.advance(),  // is can be used as method name
                         _ => {
-                            return Err(Error::Parse(
-                                "Expected field name after '.'".into(),
+                            return Err(self.parse_error(
+                                "Expected field name after '.'"
                             ));
                         }
                     };
@@ -1060,12 +1065,12 @@ impl<'a> Parser<'a> {
                 let value = token
                     .lexeme
                     .parse::<i64>()
-                    .map_err(|_| Error::Parse(format!("Invalid integer literal: {}", token.lexeme)))?;
+                    .map_err(|_| self.error_at(&token, format!("Invalid integer literal: {}", token.lexeme)))?;
                 Ok(Expr::Literal(Value::Int(value)))
             }
             TokenType::KwDouble => {
                 let value = token.lexeme.parse::<f64>().map_err(|_| {
-                    Error::Parse(format!("Invalid double literal: {}", token.lexeme))
+                    self.error_at(&token, format!("Invalid double literal: {}", token.lexeme))
                 })?;
                 Ok(Expr::Literal(Value::Double(value)))
             }
@@ -1140,14 +1145,14 @@ impl<'a> Parser<'a> {
                         is_async: true,
                     })
                 } else {
-                    return Err(Error::Parse("Expected async lambda expression".into()));
+                    return Err(self.parse_error("Expected async lambda expression"));
                 }
             }
             TokenType::LBrace => {
                 // Could be map literal or set literal
                 if self.check(&TokenType::RBrace) {
-                    return Err(Error::Parse(
-                        "Empty '{}' is not valid in expression position. Use '()' for empty tuple or '{key: value}' for single-element map.".into(),
+                    return Err(self.parse_error(
+                        "Empty '{}' is not valid in expression position. Use '()' for empty tuple or '{key: value}' for single-element map."
                     ));
                 }
                 let first_expr = self.parse_expression(Precedence::None)?;
@@ -1231,7 +1236,7 @@ impl<'a> Parser<'a> {
                 self.consume(&TokenType::RSquare, "Expected ']'")?;
                 Ok(Expr::List(elements))
             }
-            _ => Err(Error::Parse(format!(
+            _ => Err(self.error_at(&token, format!(
                 "Expected expression but found {:?} ('{}')",
                 token.typ, token.lexeme
             ))),
@@ -1472,10 +1477,28 @@ impl<'a> Parser<'a> {
         if self.check(typ) {
             Ok(self.advance())
         } else {
-            Err(Error::Parse(format!(
-                "{} at line {}",
-                message, self.peek().line
-            )))
+            let token = self.peek();
+            Err(Error::Parse {
+                message: format!("{}, found '{}'", message, token.lexeme),
+                span: Span { line: token.line, column: token.column },
+            })
+        }
+    }
+
+    /// Create a parse error at the current token position.
+    fn parse_error(&self, message: impl Into<String>) -> Error {
+        let token = self.peek();
+        Error::Parse {
+            message: message.into(),
+            span: Span { line: token.line, column: token.column },
+        }
+    }
+
+    /// Create a parse error at a specific token's position.
+    fn error_at(&self, token: &Token, message: impl Into<String>) -> Error {
+        Error::Parse {
+            message: message.into(),
+            span: Span { line: token.line, column: token.column },
         }
     }
 

@@ -89,7 +89,7 @@ fn single_compile(input: &str, output: &str, grammar: Option<&printing_press::in
                     println!("Compiled {} → {}", input, output);
                 }
                 Err(e) => {
-                    eprintln!("error: compilation failed: {}", e);
+                    eprintln!("{}", e.display());
                     std::process::exit(1);
                 }
             }
@@ -162,7 +162,7 @@ fn batch_compile(sources_dir: &str, out_dir: &str, grammar: Option<&printing_pre
                 println!("Compiled {} → {}", input_path.file_name().unwrap().to_str().unwrap(), output_path.file_name().unwrap().to_str().unwrap());
             }
             Err(e) => {
-                eprintln!("error: compilation failed for '{}': {}", input_path.display(), e);
+                eprintln!("{}", e.display());
                 errors += 1;
             }
         }

@@ -204,7 +204,7 @@ impl SerialChunk {
         }).collect();
         chunk.function_defaults = self.function_defaults.iter().map(|fd| FunctionDefaults { default_chunks: fd.clone() }).collect();
         for (k, v) in &self.function_upvalues {
-            let key = k.parse::<usize>().map_err(|_| crate::inklang::error::Error::Parse(format!("Invalid upvalue key: {}", k)))?;
+            let key = k.parse::<usize>().map_err(|_| crate::inklang::error::Error::Compile(format!("Invalid upvalue key: {}", k)))?;
             chunk.function_upvalues.insert(key, (v.count, v.regs.clone()));
         }
         chunk.spill_slot_count = self.spill_slot_count;
