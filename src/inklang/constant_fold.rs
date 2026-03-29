@@ -2,7 +2,7 @@
 //!
 //! Evaluates constant expressions at compile time when all operands are literals.
 
-use super::ast::{Expr, Stmt};
+use super::ast::{Expr, GrammarRuleBody, Stmt};
 use super::token::{Token, TokenType};
 use super::value::Value;
 
@@ -98,6 +98,20 @@ impl ConstantFolder {
                 superclass,
                 body: Box::new(self.fold_stmt(*body)),
             },
+            Stmt::GrammarDecl { keyword, name, rules } => {
+                let folded_rules = rules.into_iter().map(|rule| {
+                    GrammarRuleBody {
+                        rule_name: rule.rule_name,
+                        leading_keyword: rule.leading_keyword,
+                        body: self.fold(&rule.body),
+                    }
+                }).collect();
+                Stmt::GrammarDecl {
+                    keyword,
+                    name,
+                    rules: folded_rules,
+                }
+            }
             other => other,
         }
     }

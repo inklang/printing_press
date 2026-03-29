@@ -196,16 +196,18 @@ impl AstLowerer {
                 // Annotation declarations are compile-time only - no IR emitted
             }
             Stmt::GrammarDecl { keyword, name, rules } => {
-                // Lower each rule's body independently, then emit CallHandler.
+                // Lower each rule's body independently, optimize, then emit CallHandler.
                 let mut rule_bodies: Vec<RuleBodyIr> = Vec::new();
                 for rule in rules {
                     let mut body_lowerer = AstLowerer::new();
                     let result = body_lowerer.lower(&rule.body);
+                    let (optimized_instrs, optimized_constants) =
+                        super::optimize_ir(result.instrs, result.constants, result.arity);
                     rule_bodies.push(RuleBodyIr {
                         rule_name: rule.rule_name.clone(),
                         leading_keyword: rule.leading_keyword.clone(),
-                        instrs: result.instrs,
-                        constants: result.constants,
+                        instrs: optimized_instrs,
+                        constants: optimized_constants,
                     });
                 }
                 self.instrs.push(IrInstr::CallHandler {

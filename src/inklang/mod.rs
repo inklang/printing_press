@@ -28,7 +28,21 @@ use lowerer::AstLowerer;
 use parser::Parser;
 use register_alloc::RegisterAllocator;
 use spill_insert::SpillInserter;
+use ir::IrInstr;
 use thiserror::Error;
+use value::Value;
+
+/// Run IR-level optimization passes (SSA → liveness → regalloc → spill → peephole)
+/// on a standalone instruction sequence with its own register space.
+pub fn optimize_ir(instrs: Vec<IrInstr>, constants: Vec<Value>, arity: usize) -> (Vec<IrInstr>, Vec<Value>) {
+    let ssa_result = ssa::optimized_ssa_round_trip(instrs, constants, arity);
+    let ranges = LivenessAnalyzer::new().analyze(&ssa_result.instrs);
+    let mut allocator = RegisterAllocator::new();
+    let alloc = allocator.allocate(&ranges, arity);
+    let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
+    let resolved = peephole::run(resolved);
+    (resolved, ssa_result.constants)
+}
 
 /// Compile error types.
 #[derive(Debug, Error)]
@@ -144,26 +158,13 @@ pub fn compile_with_grammar(source: &str, name: &str, grammar: Option<&MergedGra
     // 4. Lower to IR
     let lowered = AstLowerer::new().lower(&folded);
 
-    // 5. SSA round-trip
-    let ssa_result = ssa::optimized_ssa_round_trip(
-        lowered.instrs,
-        lowered.constants,
-        lowered.arity,
-    );
-
-    // 6. Liveness + register allocation + spill
-    let ranges = LivenessAnalyzer::new().analyze(&ssa_result.instrs);
-    let mut allocator = RegisterAllocator::new();
-    let alloc = allocator.allocate(&ranges, lowered.arity);
-    let resolved = SpillInserter::new().insert(ssa_result.instrs, &alloc, &ranges);
-
-    // 6b. Peephole cleanup
-    let resolved = peephole::run(resolved);
+    // 5-6b. Optimize IR (SSA → liveness → regalloc → spill → peephole)
+    let (resolved, constants) = optimize_ir(lowered.instrs, lowered.constants, lowered.arity);
 
     // 7. Codegen
     let codegen_result = codegen::LoweredResult {
         instrs: resolved,
-        constants: ssa_result.constants,
+        constants,
         arity: lowered.arity,
     };
     let mut compiler = IrCompiler::new();
